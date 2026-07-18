@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,20 +7,186 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// ─── Trader State (singleton) ────────────────────────────────────────────────
+
+model TraderState {
+  id               String   @id @default("singleton")
+  initialDeposit   Float    @default(100)
+  balance          Float    @default(100)
+  totalTrades      Int      @default(0)
+  wins             Int      @default(0)
+  losses           Int      @default(0)
+  expired          Int      @default(0)
+  score            Float    @default(0)
+  winRate          Float    @default(0)
+  avgPnl           Float    @default(0)
+  streak           Int      @default(0)
+  bestTrade        Float    @default(0)
+  worstTrade       Float    @default(0)
+  totalPnl         Float    @default(0)
+  level            String   @default("Новичок")
+  levelEmoji       String   @default("🌱")
+  riskPerTrade     Float    @default(5)
+  defaultLeverage  Int      @default(3)
+  totalDebt        Float    @default(0)
+  totalRepaid      Float    @default(0)
+  lockedInPositions Float   @default(0)
+  freeBalance      Float    @default(100)
+  lastUpdated      BigInt   @default(0)
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Adaptive parameters stored as JSON string (SQLite)
+  adaptiveMinSlDistancePct    Float   @default(1)
+  adaptiveMinConfidence       Int     @default(60)
+  adaptiveAvoidCoins          String  @default("[]")
+  adaptiveMinRr               Float   @default(1.5)
+  adaptiveCounterTrendPenalty Float   @default(0.1)
+  adaptiveLimitExpiryHours    Int     @default(2)
+  adaptiveMarketEntryConditions String @default("[]")
+  adaptiveLessonsVersion      Int     @default(0)
 }
 
-model Post {
-  id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
+// ─── Trade ────────────────────────────────────────────────────────────────────
+
+model Trade {
+  id            String    @id
+  coinId        String
+  coinSymbol    String
+  direction     String    // LONG | SHORT
+  entryType     String    // LIMIT | MARKET
+  entry         Float
+  currentPrice  Float
+  stopLoss      Float
+  takeProfit1   Float?
+  takeProfit2   Float?
+  takeProfit3   Float?
+  confidence    Int
+  timeframe     String
+  entryReason   String
+  reasons       String    @default("[]") // JSON array of strings
+  leverage      Int
+  positionSize  Float
+  quantity      Float
+  timestamp     BigInt    // Unix ms
+  entryReached  Boolean   @default(false)
+  enteredAt     BigInt?
+  resolved      Boolean   @default(false)
+  result        String?   // WIN | LOSS | EXPIRED
+  exitPrice     Float?
+  exitReason    String?
+  closedAt      BigInt?
+  pnlUSDT       Float?
+  pnlPct        Float?
+  pointsChange  Float?
+
+  // New fields
+  trailingStop      Boolean @default(false)
+  trailingStopPrice Float?
+  trailingStepPct   Float?
+  partialExits      String  @default("[]") // JSON array of {tpLevel, percent, price, closedAt, pnl}
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([coinId])
+  @@index([direction])
+  @@index([resolved])
+  @@index([result])
+  @@index([timestamp])
+}
+
+// ─── Deposit Snapshot ─────────────────────────────────────────────────────────
+
+model DepositSnapshot {
+  id        String   @id @default(cuid())
+  timestamp BigInt   // Unix ms
+  balance   Float
+  equity    Float
+
+  createdAt DateTime @default(now())
+
+  @@index([timestamp])
+}
+
+// ─── Debt Entry ───────────────────────────────────────────────────────────────
+
+model DebtEntry {
+  id            String   @id @default(cuid())
+  timestamp     BigInt   // Unix ms
+  amount        Float
+  remainingOwed Float
+  label         String   @default("")
+
+  createdAt DateTime @default(now())
+
+  @@index([timestamp])
+}
+
+// ─── Lesson (Adaptive Learning) ───────────────────────────────────────────────
+
+model Lesson {
+  id        String   @id @default(cuid())
+  type      String   // e.g. "risk", "timing", "coin_specific"
+  description String
+  coinId    String?
+  direction String?   // LONG | SHORT
+  value     Float?    // numeric lesson value
+  timestamp BigInt    // Unix ms
+  tradeId   String?
+  severity  String    @default("info") // info | warning | critical
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([coinId])
+  @@index([type])
+  @@index([timestamp])
+  @@index([tradeId])
+}
+
+// ─── Thought (Trader Thinking Log) ────────────────────────────────────────────
+
+model Thought {
+  id         String   @id
+  timestamp  BigInt   // Unix ms
+  type       String   // scan | decision | close | adjustment | lesson | observation
+  title      String
+  detail     String
+  coinSymbol String?
+  coinId     String?
+  direction  String?   // LONG | SHORT
+  confidence Int?
+  score      Float?
+  tradeId    String?
+  pnl        Float?
+  entryType  String?   // LIMIT | MARKET
+  emotion    String    @default("neutral")
+  tags       String    @default("[]") // JSON array of strings
+
+  createdAt DateTime @default(now())
+
+  @@index([type])
+  @@index([timestamp])
+  @@index([coinId])
+  @@index([tradeId])
+}
+
+// ─── Trade Audit Log ──────────────────────────────────────────────────────────
+
+model TradeAuditLog {
+  id        String   @id @default(cuid())
+  timestamp BigInt   // Unix ms
+  action    String   // TRADE_OPENED | TRADE_CLOSED | SCAN_RUN | etc.
+  details   String   @default("{}") // JSON object
+  coinId    String?
+  tradeId   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([action])
+  @@index([timestamp])
+  @@index([coinId])
+  @@index([tradeId])
 }

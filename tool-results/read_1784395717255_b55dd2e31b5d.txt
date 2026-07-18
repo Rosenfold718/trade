@@ -1,0 +1,2002 @@
+     1→'use client';
+     2→
+     3→import React, { useState, useEffect, useCallback, useRef } from 'react';
+     4→import {
+     5→  TrendingUp, TrendingDown, Activity, BarChart3,
+     6→  RefreshCw, Search, ArrowUpRight, ArrowDownRight,
+     7→  Zap, Target, AlertTriangle, Clock,
+     8→  LineChart, Shield, Eye, Cpu,
+     9→  ChevronUp, ChevronDown, Loader2,
+    10→  Gauge, Crosshair, X, AlertCircle, CheckCircle2,
+    11→  Timer, MoveUp, MoveDown, Pause, Flame, Snowflake,
+    12→  Copy, Check, Volume2, CandlestickChart, MessageSquare, Brain, Sparkles,
+    13→  ExternalLink, DollarSign, TrendingUpIcon, Trash2
+    14→} from 'lucide-react';
+    15→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+    16→import { Badge } from '@/components/ui/badge';
+    17→import { Button } from '@/components/ui/button';
+    18→import { Input } from '@/components/ui/input';
+    19→import { ScrollArea } from '@/components/ui/scroll-area';
+    20→import { Progress } from '@/components/ui/progress';
+    21→import { Separator } from '@/components/ui/separator';
+    22→import { Slider } from '@/components/ui/slider';
+    23→
+    24→// Types
+    25→interface CoinData {
+    26→  id: string; symbol: string; name: string; image?: string;
+    27→  current_price: number; market_cap: number; market_cap_rank: number;
+    28→  total_volume: number; price_change_percentage_24h: number;
+    29→  sparkline_in_7d: number[]; high_24h: number; low_24h: number;
+    30→}
+    31→
+    32→interface TradeSignal {
+    33→  direction: 'LONG' | 'SHORT' | 'FLAT';
+    34→  confidence: number;
+    35→  entry: number;
+    36→  entryType: 'LIMIT' | 'MARKET';
+    37→  entryReason: string;
+    38→  stopLoss: number;
+    39→  takeProfit1: number;
+    40→  takeProfit2: number;
+    41→  takeProfit3: number;
+    42→  riskReward: number;
+    43→  holdDuration: string;
+    44→  holdDurationHours: number;
+    45→  reasons: string[];
+    46→  warnings: string[];
+    47→  indicators: IndicatorResult[];
+    48→  multiTimeframe: MultiTimeframeResult;
+    49→  currentPrice: number;
+    50→  atr: number;
+    51→  support: number;
+    52→  resistance: number;
+    53→  trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+    54→  momentum: 'STRONG' | 'MODERATE' | 'WEAK';
+    55→  candlePattern: string | null;
+    56→  volumeSignal: string | null;
+    57→}
+    58→
+    59→interface IndicatorResult {
+    60→  name: string; value: number | string;
+    61→  signal: 'BUY' | 'SELL' | 'NEUTRAL'; description: string; weight: number;
+    62→}
+    63→
+    64→interface MultiTimeframeResult {
+    65→  m5?: TimeframeVerdict;
+    66→  m15?: TimeframeVerdict;
+    67→  h1?: TimeframeVerdict;
+    68→  h4?: TimeframeVerdict;
+    69→  consensus: string;
+    70→  alignment: number;
+    71→}
+    72→
+    73→interface TimeframeVerdict {
+    74→  direction: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+    75→  score: number;
+    76→  trend: string;
+    77→  keyLevel: string;
+    78→}
+    79→
+    80→interface SignalResult {
+    81→  type: 'BUY' | 'SELL' | 'HOLD';
+    82→  strength: number;
+    83→  indicators: IndicatorResult[];
+    84→  summary: string;
+    85→  forecast?: any;
+    86→  tradeSignal?: TradeSignal;
+    87→}
+    88→
+    89→interface ChartDataPoint {
+    90→  timestamp: number; date: string; time: string;
+    91→  open: number; high: number; low: number; close: number; volume: number;
+    92→  ema9?: number; ema21?: number;
+    93→  bbUpper?: number; bbLower?: number;
+    94→  rsi?: number; macd?: number; macdSignal?: number; macdHist?: number;
+    95→}
+    96→
+    97→interface PositionTool {
+    98→  enabled: boolean;
+    99→  direction: 'LONG' | 'SHORT';
+   100→  entryPrice: number;
+   101→  targetPrice: number;
+   102→  stopLoss: number;
+   103→  amount: number;
+   104→  leverage: number;
+   105→}
+   106→
+   107→interface SentimentData {
+   108→  overallSentiment: string; sentimentScore: number;
+   109→  fearGreed: { value: number; classification: string };
+   110→  recommendation: string;
+   111→  newsAnalysis: { bullish_factors: string[]; bearish_factors: string[] };
+   112→  source: string;
+   113→}
+   114→
+   115→interface Trade {
+   116→  id: string;
+   117→  coinId: string;
+   118→  coinSymbol: string;
+   119→  direction: 'LONG' | 'SHORT';
+   120→  entryType: 'LIMIT' | 'MARKET';
+   121→  entry: number;
+   122→  currentPrice: number;
+   123→  stopLoss: number;
+   124→  takeProfit1: number;
+   125→  takeProfit2: number;
+   126→  takeProfit3: number;
+   127→  confidence: number;
+   128→  timeframe: string;
+   129→  entryReason: string;
+   130→  reasons: string[];
+   131→  leverage: number;
+   132→  positionSize: number;
+   133→  quantity: number;
+   134→  timestamp: number;
+   135→  entryReached: boolean;
+   136→  enteredAt: number | null;
+   137→  resolved: boolean;
+   138→  result: 'WIN' | 'LOSS' | 'EXPIRED' | null;
+   139→  exitPrice: number | null;
+   140→  exitReason: string | null;
+   141→  closedAt: number | null;
+   142→  pnlUSDT: number | null;
+   143→  pnlPct: number | null;
+   144→  pointsChange: number | null;
+   145→}
+   146→
+   147→interface DepositSnapshot {
+   148→  timestamp: number;
+   149→  balance: number;
+   150→  equity: number;
+   151→}
+   152→
+   153→interface DebtEntry {
+   154→  timestamp: number;
+   155→  amount: number;
+   156→  remainingOwed: number;
+   157→  label: string;
+   158→}
+   159→
+   160→interface Lesson {
+   161→  type: string;
+   162→  description: string;
+   163→  coinId?: string;
+   164→  direction?: 'LONG' | 'SHORT';
+   165→  value?: number;
+   166→  timestamp: number;
+   167→  tradeId: string;
+   168→  severity: 'low' | 'medium' | 'high';
+   169→}
+   170→
+   171→interface AdaptiveParams {
+   172→  minSlDistancePct: number;
+   173→  minConfidence: number;
+   174→  avoidCoins: string[];
+   175→  minRr: number;
+   176→  counterTrendPenalty: number;
+   177→  limitExpiryHours: number;
+   178→  marketEntryConditions: string[];
+   179→  lessons: Lesson[];
+   180→  lessonsVersion: number;
+   181→}
+   182→
+   183→interface ReputationData {
+   184→  initialDeposit: number;
+   185→  balance: number;
+   186→  totalTrades: number;
+   187→  wins: number;
+   188→  losses: number;
+   189→  expired: number;
+   190→  score: number;
+   191→  winRate: number;
+   192→  avgPnl: number;
+   193→  streak: number;
+   194→  bestTrade: number;
+   195→  worstTrade: number;
+   196→  totalPnl: number;
+   197→  level: string;
+   198→  levelEmoji: string;
+   199→  riskPerTrade: number;
+   200→  defaultLeverage: number;
+   201→  trades: Trade[];
+   202→  depositHistory: DepositSnapshot[];
+   203→  lastUpdated: number;
+   204→  totalDebt: number;
+   205→  debtHistory: DebtEntry[];
+   206→  totalRepaid: number;
+   207→  lockedInPositions: number;
+   208→  freeBalance: number;
+   209→  adaptive: AdaptiveParams;
+   210→}
+   211→
+   212→function formatPrice(price: number): string {
+   213→  if (!price || !isFinite(price)) return '0.00';
+   214→  if (price >= 1000) return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+   215→  if (price >= 1) return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+   216→  if (price >= 0.01) return price.toFixed(4);
+   217→  if (price >= 0.0001) return price.toFixed(6);
+   218→  return price.toFixed(8);
+   219→}
+   220→
+   221→function formatNumber(num: number): string {
+   222→  if (num >= 1e12) return `$${(num / 1e12).toFixed(2)}T`;
+   223→  if (num >= 1e9) return `$${(num / 1e9).toFixed(2)}B`;
+   224→  if (num >= 1e6) return `$${(num / 1e6).toFixed(2)}M`;
+   225→  return `$${num.toLocaleString()}`;
+   226→}
+   227→
+   228→function formatTimeAgo(ts: number): string {
+   229→  const diff = Date.now() - ts;
+   230→  if (diff < 60000) return 'только что';
+   231→  if (diff < 3600000) return `${Math.floor(diff / 60000)} мин`;
+   232→  if (diff < 86400000) return `${Math.floor(diff / 3600000)} ч`;
+   233→  return new Date(ts).toLocaleDateString('ru-RU');
+   234→}
+   235→
+   236→function pctChange(from: number, to: number): string {
+   237→  if (from === 0) return '0.00';
+   238→  const pct = ((to - from) / from) * 100;
+   239→  return `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+   240→}
+   241→
+   242→// Candlestick Chart
+   243→function CandlestickChartComponent({ data, overlayIndicators, positionTool, tradeSignal }: {
+   244→  data: ChartDataPoint[]; overlayIndicators: boolean; positionTool: PositionTool | null; tradeSignal: TradeSignal | null;
+   245→}) {
+   246→  if (data.length === 0) return null;
+   247→  const width = 960, height = 480;
+   248→  const margin = { top: 20, right: 70, bottom: 30, left: 10 };
+   249→  const chartW = width - margin.left - margin.right;
+   250→  const chartH = height - margin.top - margin.bottom;
+   251→  const prices = data.flatMap(d => [d.high, d.low]).filter(v => v > 0);
+   252→  if (positionTool?.enabled) { prices.push(positionTool.entryPrice, positionTool.targetPrice, positionTool.stopLoss); }
+   253→  if (tradeSignal && tradeSignal.direction !== 'FLAT') { prices.push(tradeSignal.entry, tradeSignal.stopLoss, tradeSignal.takeProfit2, tradeSignal.takeProfit1); }
+   254→  const minP = Math.min(...prices), maxP = Math.max(...prices), range = maxP - minP || 1, padding = range * 0.08;
+   255→  const yMin = minP - padding, yMax = maxP + padding, yRange = yMax - yMin;
+   256→  const yScale = (v: number) => margin.top + chartH - ((v - yMin) / yRange) * chartH;
+   257→  const xScale = (i: number) => margin.left + (i / (data.length - 1 || 1)) * chartW;
+   258→  const candleW = Math.max(2, Math.min(20, (chartW / data.length) * 0.6));
+   259→  const formatY = (v: number) => {
+   260→    if (v >= 10000) return `$${(v/1000).toFixed(1)}k`;
+   261→    if (v >= 1000) return `$${v.toLocaleString('en-US', {maximumFractionDigits: 0})}`;
+   262→    if (v >= 1) return `$${v.toFixed(2)}`;
+   263→    if (v >= 0.01) return `$${v.toFixed(4)}`;
+   264→    return `$${v.toFixed(6)}`;
+   265→  };
+   266→  const ema9Data = data.map((d, i) => d.ema9 ? { x: xScale(i), y: yScale(d.ema9) } : null).filter(Boolean);
+   267→  const ema21Data = data.map((d, i) => d.ema21 ? { x: xScale(i), y: yScale(d.ema21) } : null).filter(Boolean);
+   268→  const linePath = (points: { x: number; y: number }[]) => points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ');
+   269→  const ticks = Array.from({ length: 6 }, (_, i) => yMin + (yRange * i) / 5);
+   270→  const ts = tradeSignal, pt = positionTool, hasPosition = pt?.enabled && pt.entryPrice > 0;
+   271→  const targetPnl = hasPosition ? (pt!.direction === 'LONG' ? ((pt!.targetPrice - pt!.entryPrice) / pt!.entryPrice) : ((pt!.entryPrice - pt!.targetPrice) / pt!.entryPrice)) * pt!.amount * pt!.leverage : 0;
+   272→  const stopPnl = hasPosition ? (pt!.direction === 'LONG' ? ((pt!.stopLoss - pt!.entryPrice) / pt!.entryPrice) : ((pt!.entryPrice - pt!.stopLoss) / pt!.entryPrice)) * pt!.amount * pt!.leverage : 0;
+   273→  const rr = hasPosition && stopPnl !== 0 ? Math.abs(targetPnl / stopPnl) : 0;
+   274→
+   275→  const LevelLine = ({ price, color, label, opacity = 1 }: { price: number; color: string; label: string; opacity?: number }) => {
+   276→    if (price <= 0) return null; const y = yScale(price); if (y < margin.top || y > margin.top + chartH) return null;
+   277→    const priceLabel = formatPrice(price);
+   278→    const labelW = Math.max(62, (label.length + priceLabel.length + 3) * 5.5);
+   279→    return <><line x1={margin.left} y1={y} x2={width - margin.right} y2={y} stroke={color} strokeWidth={1.2} strokeDasharray="6 3" opacity={opacity} /><rect x={width - margin.right + 2} y={y - 8} width={labelW} height={16} rx={3} fill={color} opacity={opacity} /><text x={width - margin.right + 2 + labelW/2} y={y + 3} fontSize={7} fill="white" fontWeight="bold" textAnchor="middle" opacity={opacity}>{label} ${priceLabel}</text></>;
+   280→  };
+   281→
+   282→  return (
+   283→    <svg width="100%" viewBox={`0 0 ${width} ${height}`} className="w-full" preserveAspectRatio="xMidYMid meet">
+   284→      {ticks.map((t, i) => (<g key={i}><line x1={margin.left} y1={yScale(t)} x2={width - margin.right} y2={yScale(t)} stroke="hsl(var(--border))" strokeWidth={0.5} opacity={0.3} /><text x={width - margin.right + 5} y={yScale(t) + 4} fontSize={9} fill="hsl(var(--muted-foreground))" textAnchor="start">{formatY(t)}</text></g>))}
+   285→      {data.filter((_, i) => i % Math.max(1, Math.floor(data.length / 8)) === 0).map((d, i) => { const idx = data.indexOf(d); return <text key={i} x={xScale(idx)} y={height - 5} fontSize={8} fill="hsl(var(--muted-foreground))" textAnchor="middle">{d.time || d.date.slice(0, 5)}</text>; })}
+   286→      {/* Signal zones */}
+   287→      {ts && ts.direction !== 'FLAT' && <><rect x={margin.left} y={yScale(Math.max(ts.entry, ts.takeProfit2))} width={chartW} height={Math.abs(yScale(ts.entry) - yScale(ts.takeProfit2))} fill={ts.direction === 'LONG' ? '#10b981' : '#ef4444'} opacity={0.04} /><rect x={margin.left} y={yScale(Math.max(ts.entry, ts.stopLoss))} width={chartW} height={Math.abs(yScale(ts.entry) - yScale(ts.stopLoss))} fill="#ef4444" opacity={0.06} /></>}
+   288→      {/* Candles */}
+   289→      {data.map((d, i) => { const isGreen = d.close >= d.open; const color = isGreen ? '#10b981' : '#ef4444'; const bodyTop = yScale(Math.max(d.open, d.close)); const bodyBottom = yScale(Math.min(d.open, d.close)); const cx = xScale(i); return <g key={i}><line x1={cx} y1={yScale(d.high)} x2={cx} y2={yScale(d.low)} stroke={color} strokeWidth={1} /><rect x={cx - candleW / 2} y={bodyTop} width={candleW} height={Math.max(1, bodyBottom - bodyTop)} fill={color} stroke={color} strokeWidth={0.5} opacity={0.9} rx={1} /></g>; })}
+   290→      {/* EMA overlays */}
+   291→      {overlayIndicators && ema9Data.length > 1 && <path d={linePath(ema9Data)} fill="none" stroke="#f97316" strokeWidth={1.5} strokeDasharray="4 2" />}
+   292→      {overlayIndicators && ema21Data.length > 1 && <path d={linePath(ema21Data)} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="4 2" />}
+   293→      {/* Current price line */}
+   294→      {data.length > 0 && <><line x1={margin.left} y1={yScale(data[data.length - 1].close)} x2={width - margin.right} y2={yScale(data[data.length - 1].close)} stroke="#10b981" strokeWidth={0.5} strokeDasharray="3 3" opacity={0.5} /><text x={width - margin.right + 5} y={yScale(data[data.length - 1].close) + 4} fontSize={9} fill="#10b981" fontWeight="bold">{formatY(data[data.length - 1].close)}</text></>}
+   295→      {/* Trade signal levels */}
+   296→      {ts && ts.direction !== 'FLAT' && <><LevelLine price={ts.entry} color="#3b82f6" label={ts.entryType === 'LIMIT' ? 'LIMIT' : 'ENTRY'} /><LevelLine price={ts.stopLoss} color="#ef4444" label="STOP" /><LevelLine price={ts.takeProfit1} color="#10b981" label="TP1" opacity={0.7} /><LevelLine price={ts.takeProfit2} color="#10b981" label="TP2" />
+   297→        <rect x={margin.left + 8} y={margin.top + 2} width={240} height={92} rx={6} fill="hsl(var(--card))" stroke="hsl(var(--border))" strokeWidth={1} opacity={0.95} />
+   298→        <text x={margin.left + 16} y={margin.top + 18} fontSize={13} fill={ts.direction === 'LONG' ? '#10b981' : '#ef4444'} fontWeight="bold">{ts.direction === 'LONG' ? '▲ LONG' : '▼ SHORT'} — {ts.confidence}%</text>
+   299→        <text x={margin.left + 16} y={margin.top + 35} fontSize={9} fill="hsl(var(--muted-foreground))">Вход: <tspan fill="#3b82f6" fontWeight="bold">${formatPrice(ts.entry)}</tspan> | Стоп: <tspan fill="#ef4444" fontWeight="bold">${formatPrice(ts.stopLoss)}</tspan></text>
+   300→        <text x={margin.left + 16} y={margin.top + 49} fontSize={9} fill="hsl(var(--muted-foreground))">TP1: <tspan fill="#22c55e" fontWeight="bold">${formatPrice(ts.takeProfit1)}</tspan> | TP2: <tspan fill="#10b981" fontWeight="bold">${formatPrice(ts.takeProfit2)}</tspan> | R:R <tspan fill={ts.riskReward >= 2 ? '#10b981' : '#eab308'} fontWeight="bold">{ts.riskReward.toFixed(2)}</tspan></text>
+   301→        <text x={margin.left + 16} y={margin.top + 63} fontSize={9} fill="hsl(var(--muted-foreground))">{ts.holdDuration} | {ts.momentum} | {ts.trend}</text>
+   302→        <text x={margin.left + 16} y={margin.top + 77} fontSize={8} fill="hsl(var(--muted-foreground))">Подд: <tspan fill="#10b981">${formatPrice(ts.support)}</tspan> | Сопр: <tspan fill="#ef4444">${formatPrice(ts.resistance)}</tspan></text>
+   303→        {ts.candlePattern && <text x={margin.left + 16} y={margin.top + 89} fontSize={8} fill="#f59e0b">Паттерн: {ts.candlePattern}</text>}
+   304→      </>}
+   305→      {/* Position tool levels */}
+   306→      {hasPosition && <><LevelLine price={pt!.entryPrice} color="#3b82f6" label="ENTRY" /><LevelLine price={pt!.targetPrice} color="#10b981" label="TGT" /><LevelLine price={pt!.stopLoss} color="#ef4444" label="STOP" />
+   307→        <rect x={margin.left + 255} y={margin.top + 2} width={180} height={55} rx={6} fill="hsl(var(--card))" stroke="hsl(var(--border))" strokeWidth={1} opacity={0.95} />
+   308→        <text x={margin.left + 263} y={margin.top + 18} fontSize={11} fill={pt!.direction === 'LONG' ? '#10b981' : '#ef4444'} fontWeight="bold">{pt!.direction === 'LONG' ? '▲ LONG' : '▼ SHORT'} — {pt!.leverage}x</text>
+   309→        <text x={margin.left + 263} y={margin.top + 33} fontSize={9} fill="hsl(var(--muted-foreground))">Профит: <tspan fill={targetPnl >= 0 ? '#10b981' : '#ef4444'} fontWeight="bold">{targetPnl >= 0 ? '+' : ''}{formatPrice(targetPnl)}$</tspan></text>
+   310→        <text x={margin.left + 263} y={margin.top + 46} fontSize={9} fill="hsl(var(--muted-foreground))">R:R <tspan fill={rr >= 2 ? '#10b981' : '#eab308'} fontWeight="bold">{rr.toFixed(2)}</tspan> | Итого: <tspan fontWeight="bold" fill={targetPnl >= 0 ? '#10b981' : '#ef4444'}>{formatPrice(pt!.amount + targetPnl)}$</tspan></text>
+   311→      </>}
+   312→    </svg>
+   313→  );
+   314→}
+   315→
+   316→function MiniLineChart({ data, color, yMin, yMax, refLines }: { data: number[]; color: string; yMin: number; yMax: number; refLines?: number[]; }) {
+   317→  if (data.length < 2) return <div className="h-[110px] flex items-center justify-center text-muted-foreground text-xs">—</div>;
+   318→  const w = 500, h = 110, margin = { top: 5, right: 35, bottom: 5, left: 5 };
+   319→  const cw = w - margin.left - margin.right, ch = h - margin.top - margin.bottom;
+   320→  const range = yMax - yMin || 1;
+   321→  const yS = (v: number) => margin.top + ch - ((v - yMin) / range) * ch;
+   322→  const xS = (i: number) => margin.left + (i / (data.length - 1)) * cw;
+   323→  return (
+   324→    <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="w-full" preserveAspectRatio="xMidYMid meet">
+   325→      {refLines?.map((v, i) => <g key={i}><line x1={margin.left} y1={yS(v)} x2={margin.left + cw} y2={yS(v)} stroke={v > 50 ? '#ef4444' : '#10b981'} strokeWidth={0.5} strokeDasharray="3 3" opacity={0.5} /><text x={margin.left + cw + 3} y={yS(v) + 3} fontSize={7} fill={v > 50 ? '#ef4444' : '#10b981'}>{v}</text></g>)}
+   326→      <path d={data.map((v, i) => `${i === 0 ? 'M' : 'L'}${xS(i)},${yS(v)}`).join(' ')} fill="none" stroke={color} strokeWidth={1.5} />
+   327→      {data.length > 0 && <text x={margin.left + cw + 3} y={yS(data[data.length - 1]) + 3} fontSize={8} fill={color} fontWeight="bold">{data[data.length - 1].toFixed(1)}</text>}
+   328→    </svg>
+   329→  );
+   330→}
+   331→
+   332→function MiniMACDChart({ data }: { data: ChartDataPoint[] }) {
+   333→  const hist = data.map(d => d.macdHist).filter(v => v != null) as number[];
+   334→  const macd = data.map(d => d.macd).filter(v => v != null) as number[];
+   335→  const sig = data.map(d => d.macdSignal).filter(v => v != null) as number[];
+   336→  if (hist.length < 2) return <div className="h-[110px] flex items-center justify-center text-muted-foreground text-xs">—</div>;
+   337→  const w = 500, h = 110, margin = { top: 5, right: 40, bottom: 5, left: 5 };
+   338→  const cw = w - margin.left - margin.right, ch = h - margin.top - margin.bottom;
+   339→  const all = [...macd, ...sig, ...hist], maxAbs = Math.max(Math.abs(Math.min(...all)), Math.abs(Math.max(...all))) || 1, yR = maxAbs * 1.2;
+   340→  const yS = (v: number) => margin.top + ch / 2 - (v / yR) * (ch / 2);
+   341→  const xS = (i: number, t: number) => margin.left + (i / (t - 1)) * cw;
+   342→  const bw = Math.max(1, (cw / hist.length) * 0.6);
+   343→  return (
+   344→    <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="w-full" preserveAspectRatio="xMidYMid meet">
+   345→      <line x1={margin.left} y1={yS(0)} x2={margin.left + cw} y2={yS(0)} stroke="hsl(var(--muted-foreground))" strokeWidth={0.5} opacity={0.3} />
+   346→      {hist.map((v, i) => <rect key={i} x={xS(i, hist.length) - bw / 2} y={v >= 0 ? yS(v) : yS(0)} width={bw} height={Math.abs(yS(v) - yS(0))} fill={v >= 0 ? '#10b981' : '#ef4444'} opacity={0.4} />)}
+   347→      {macd.length > 1 && <path d={macd.map((v, i) => `${i === 0 ? 'M' : 'L'}${xS(i, macd.length)},${yS(v)}`).join(' ')} fill="none" stroke="#3b82f6" strokeWidth={1.2} />}
+   348→      {sig.length > 1 && <path d={sig.map((v, i) => `${i === 0 ? 'M' : 'L'}${xS(i, sig.length)},${yS(v)}`).join(' ')} fill="none" stroke="#ef4444" strokeWidth={1.2} />}
+   349→    </svg>
+   350→  );
+   351→}
+   352→
+   353→// Deposit mini chart
+   354→function DepositChart({ data, initialDeposit, totalDebt }: { data: DepositSnapshot[]; initialDeposit: number; totalDebt?: number }) {
+   355→  if (data.length < 2) return null;
+   356→  const w = 560, h = 100, margin = { top: 10, right: 50, bottom: 10, left: 10 };
+   357→  const cw = w - margin.left - margin.right, ch = h - margin.top - margin.bottom;
+   358→  // Use equity (includes locked positions + unrealized PnL)
+   359→  const balances = data.map(d => d.equity);
+   360→  // Reference: effective capital = initialDeposit + totalDebt (what was actually available)
+   361→  const effectiveCapital = initialDeposit + (totalDebt || 0);
+   362→  const minB = Math.min(...balances, effectiveCapital) * 0.95;
+   363→  const maxB = Math.max(...balances, effectiveCapital) * 1.05;
+   364→  const range = maxB - minB || 1;
+   365→  const xS = (i: number) => margin.left + (i / (data.length - 1)) * cw;
+   366→  const yS = (v: number) => margin.top + ch - ((v - minB) / range) * ch;
+   367→  // Profit = equity above effective capital
+   368→  const lastVal = data[data.length - 1].equity;
+   369→  const isProfit = lastVal >= effectiveCapital;
+   370→  const lineColor = isProfit ? '#10b981' : '#ef4444';
+   371→  const areaPath = data.map((d, i) => `${i === 0 ? 'M' : 'L'}${xS(i)},${yS(d.equity)}`).join(' ') + ` L${xS(data.length - 1)},${margin.top + ch} L${margin.left},${margin.top + ch} Z`;
+   372→  const linePath = data.map((d, i) => `${i === 0 ? 'M' : 'L'}${xS(i)},${yS(d.equity)}`).join(' ');
+   373→  // PnL relative to own capital only (not debt)
+   374→  const ownEquity = lastVal - (totalDebt || 0);
+   375→  const pnlPct = ((ownEquity / initialDeposit - 1) * 100).toFixed(1);
+   376→  return (
+   377→    <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="w-full" preserveAspectRatio="xMidYMid meet">
+   378→      {/* Effective capital reference line */}
+   379→      <line x1={margin.left} y1={yS(effectiveCapital)} x2={margin.left + cw} y2={yS(effectiveCapital)} stroke="hsl(var(--muted-foreground))" strokeWidth={0.5} strokeDasharray="4 2" opacity={0.5} />
+   380→      <text x={margin.left + cw + 3} y={yS(effectiveCapital) + 3} fontSize={7} fill="hsl(var(--muted-foreground))">${effectiveCapital.toFixed(0)}</text>
+   381→      {/* Area */}
+   382→      <path d={areaPath} fill={lineColor} opacity={0.08} />
+   383→      {/* Line */}
+   384→      <path d={linePath} fill="none" stroke={lineColor} strokeWidth={2} />
+   385→      {/* Last value */}
+   386→      <text x={margin.left + cw + 3} y={yS(lastVal) + 3} fontSize={9} fill={lineColor} fontWeight="bold">${lastVal.toFixed(2)}</text>
+   387→      <text x={margin.left + 5} y={margin.top + 12} fontSize={8} fill={isProfit ? '#10b981' : '#ef4444'} fontWeight="bold">
+   388→        {parseFloat(pnlPct) >= 0 ? '+' : ''}{pnlPct}% PnL
+   389→      </text>
+   390→    </svg>
+   391→  );
+   392→}
+   393→
+   394→// ============================================
+   395→// TRADE TERMINAL MODAL — Full-screen trade view
+   396→// ============================================
+   397→function TradeTerminalModal({ trade, coins, onClose }: { trade: Trade; coins: CoinData[]; onClose: () => void }) {
+   398→  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
+   399→  const [loading, setLoading] = useState(true);
+   400→  const [currentPrice, setCurrentPrice] = useState<number>(0);
+   401→  const coinData = coins.find(c => c.id === trade.coinId);
+   402→  const symbol = trade.coinSymbol;
+   403→
+   404→  useEffect(() => {
+   405→    let mounted = true;
+   406→    const fetchChart = async () => {
+   407→      setLoading(true);
+   408→      try {
+   409→        const res = await fetch(`/api/crypto/signals?coin=${trade.coinId}&interval=${trade.timeframe || '1h'}`);
+   410→        if (res.ok && mounted) {
+   411→          const json = await res.json();
+   412→          setChartData(json.chartData || []);
+   413→        }
+   414→      } catch {} finally {
+   415→        if (mounted) setLoading(false);
+   416→      }
+   417→    };
+   418→    fetchChart();
+   419→    const iv = setInterval(fetchChart, 45000);
+   420→    return () => { mounted = false; clearInterval(iv); };
+   421→  }, [trade.coinId, trade.timeframe]);
+   422→
+   423→  useEffect(() => {
+   424→    if (coinData?.current_price) {
+   425→      setCurrentPrice(coinData.current_price);
+   426→    } else if (chartData.length > 0) {
+   427→      setCurrentPrice(chartData[chartData.length - 1].close);
+   428→    }
+   429→  }, [coinData, chartData]);
+   430→
+   431→  const unrealizedPnL = !trade.resolved && trade.entryReached && currentPrice > 0
+   432→    ? (trade.direction === 'LONG'
+   433→        ? (currentPrice - trade.entry) * trade.quantity * trade.leverage
+   434→        : (trade.entry - currentPrice) * trade.quantity * trade.leverage)
+   435→    : null;
+   436→  const unrealizedPct = unrealizedPnL !== null && trade.positionSize > 0
+   437→    ? (unrealizedPnL / trade.positionSize) * 100 : null;
+   438→  const distToEntry = !trade.entryReached && currentPrice > 0 && trade.entry > 0
+   439→    ? ((trade.entry - currentPrice) / currentPrice) * 100 : null;
+   440→
+   441→  const fmtDate = (ts: number) => new Date(ts).toLocaleString('ru-RU', {
+   442→    day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit'
+   443→  });
+   444→  const fmtTime = (ts: number) => new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+   445→
+   446→  const tradeDuration = trade.closedAt
+   447→    ? Math.round((trade.closedAt - (trade.enteredAt || trade.timestamp)) / 60000)
+   448→    : trade.entryReached
+   449→    ? Math.round((Date.now() - (trade.enteredAt || trade.timestamp)) / 60000)
+   450→    : null;
+   451→
+   452→  const tradeSignalForChart: TradeSignal | null = {
+   453→    direction: trade.direction, confidence: trade.confidence, entry: trade.entry,
+   454→    entryType: trade.entryType, entryReason: trade.entryReason, stopLoss: trade.stopLoss,
+   455→    takeProfit1: trade.takeProfit1, takeProfit2: trade.takeProfit2, takeProfit3: trade.takeProfit3,
+   456→    riskReward: trade.entry > 0 && trade.stopLoss > 0 ? Math.abs(trade.takeProfit1 - trade.entry) / Math.abs(trade.entry - trade.stopLoss) : 0,
+   457→    holdDuration: '', holdDurationHours: 0, reasons: trade.reasons, warnings: [],
+   458→    indicators: [], multiTimeframe: { consensus: 'NEUTRAL', alignment: 0 },
+   459→    currentPrice: currentPrice || trade.currentPrice, atr: 0, support: 0, resistance: 0,
+   460→    trend: 'BULLISH', momentum: 'MODERATE', candlePattern: null, volumeSignal: null,
+   461→  };
+   462→
+   463→  return (
+   464→    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" onClick={onClose}>
+   465→      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+   466→      <div className="relative w-[95vw] h-[90vh] bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl overflow-hidden flex" onClick={e => e.stopPropagation()}>
+   467→
+   468→        {/* Close button — always visible */}
+   469→        <button onClick={onClose} className="absolute top-3 right-3 z-20 w-9 h-9 flex items-center justify-center rounded-full bg-black/60 hover:bg-black/80 text-white transition-colors" title="Закрыть">
+   470→          <X className="w-5 h-5" />
+   471→        </button>
+   472→
+   473→        {/* LEFT: Chart — takes all remaining space */}
+   474→        <div className="flex-1 flex flex-col min-w-0">
+   475→          {/* Top bar */}
+   476→          <div className={`flex items-center justify-between px-6 py-3 border-b border-zinc-200 dark:border-zinc-700 ${
+   477→            trade.direction === 'LONG' ? 'bg-gradient-to-r from-emerald-500/10 to-transparent' : 'bg-gradient-to-r from-red-500/10 to-transparent'
+   478→          }`}>
+   479→            <div className="flex items-center gap-4">
+   480→              <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg font-black ${
+   481→                trade.direction === 'LONG' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-red-500/20 text-red-500'
+   482→              }`}>
+   483→                {trade.direction === 'LONG' ? '▲' : '▼'}
+   484→              </div>
+   485→              <div>
+   486→                <div className="flex items-center gap-2">
+   487→                  <span className={`text-xl font-black ${trade.direction === 'LONG' ? 'text-emerald-500' : 'text-red-500'}`}>
+   488→                    {trade.direction === 'LONG' ? 'ЛОНГ' : 'ШОРТ'}
+   489→                  </span>
+   490→                  <span className="text-lg font-bold text-foreground">{symbol}/USDT</span>
+   491→                  <Badge variant="outline" className="text-[10px]">{trade.timeframe}</Badge>
+   492→                  {!trade.resolved && <Badge className="text-[10px] bg-blue-500 text-white">АКТИВЕН</Badge>}
+   493→                  {trade.resolved && trade.result === 'WIN' && <Badge className="text-[10px] bg-emerald-500 text-white">+ПРИБЫЛЬ</Badge>}
+   494→                  {trade.resolved && trade.result === 'LOSS' && <Badge className="text-[10px] bg-red-500 text-white">-УБЫТОК</Badge>}
+   495→                  {trade.resolved && trade.result === 'EXPIRED' && <Badge className="text-[10px] bg-yellow-500 text-white">ИСТЁК</Badge>}
+   496→                </div>
+   497→                <div className="text-[11px] text-muted-foreground mt-0.5">
+   498→                  {fmtDate(trade.timestamp)}
+   499→                  {trade.enteredAt && trade.enteredAt !== trade.timestamp && <> · Вход: {fmtTime(trade.enteredAt)}</>}
+   500→                  {trade.closedAt && <> · Выход: {fmtTime(trade.closedAt)}</>}
+   501→                  {tradeDuration !== null && <> · {tradeDuration >= 60 ? `${Math.floor(tradeDuration/60)}ч ${tradeDuration%60}м` : `${tradeDuration}м`}</>}
+   502→                </div>
+   503→              </div>
+   504→            </div>
+   505→            {/* P&L badge in header */}
+   506→            {!trade.resolved && trade.entryReached && unrealizedPnL !== null && (
+   507→              <div className={`font-mono font-black text-2xl ${unrealizedPnL >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+   508→                {unrealizedPnL >= 0 ? '+' : ''}{unrealizedPnL.toFixed(2)} USDT
+   509→              </div>
+   510→            )}
+   511→            {trade.resolved && trade.pnlUSDT !== null && (
+   512→              <div className={`font-mono font-black text-2xl ${trade.pnlUSDT >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+   513→                {trade.pnlUSDT >= 0 ? '+' : ''}{trade.pnlUSDT.toFixed(2)} USDT
+   514→              </div>
+   515→            )}
+   516→
+   517→          </div>
+   518→
+   519→          {/* Chart area — fills remaining height */}
+   520→          <div className="flex-1 p-4">
+   521→            {loading ? (
+   522→              <div className="h-full flex items-center justify-center">
+   523→                <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
+   524→                <span className="ml-3 text-sm text-muted-foreground">Загрузка графика...</span>
+   525→              </div>
+   526→            ) : chartData.length > 0 ? (
+   527→              <CandlestickChartComponent data={chartData} overlayIndicators={true} positionTool={null} tradeSignal={tradeSignalForChart} />
+   528→            ) : (
+   529→              <div className="h-full flex items-center justify-center text-muted-foreground">График недоступен</div>
+   530→            )}
+   531→          </div>
+   532→        </div>
+   533→
+   534→        {/* RIGHT: Info sidebar */}
+   535→        <div className="w-[360px] border-l border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-y-auto flex-shrink-0">
+   536→          <div className="p-5 space-y-4">
+   537→            {/* Position Info */}
+   538→            <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 p-4 space-y-3">
+   539→              <div className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">
+   540→                <DollarSign className="w-3.5 h-3.5" /> Позиция
+   541→              </div>
+   542→              <div className="grid grid-cols-2 gap-3">
+   543→                <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-3">
+   544→                  <div className="text-[9px] text-zinc-400 uppercase">Сумма</div>
+   545→                  <div className="font-mono font-bold text-base text-zinc-900 dark:text-zinc-100">${trade.positionSize.toFixed(2)}</div>
+   546→                </div>
+   547→                <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-3">
+   548→                  <div className="text-[9px] text-zinc-400 uppercase">Плечо</div>
+   549→                  <div className="font-mono font-bold text-base text-blue-500">{trade.leverage}x</div>
+   550→                </div>
+   551→                <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-3">
+   552→                  <div className="text-[9px] text-zinc-400 uppercase">Количество</div>
+   553→                  <div className="font-mono font-bold text-sm text-zinc-900 dark:text-zinc-100">{trade.quantity.toFixed(6)}</div>
+   554→                </div>
+   555→                <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-3">
+   556→                  <div className="text-[9px] text-zinc-400 uppercase">Уверенность</div>
+   557→                  <div className="font-mono font-bold text-base text-zinc-900 dark:text-zinc-100">{trade.confidence}%</div>
+   558→                </div>
+   559→              </div>
+   560→            </div>
+   561→
+   562→            {/* Price Levels */}
+   563→            <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 p-4 space-y-3">
+   564→              <div className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">
+   565→                <Target className="w-3.5 h-3.5" /> Уровни
+   566→              </div>
+   567→              <div className="space-y-2">
+   568→                {[
+   569→                  { label: `ВХОД ${trade.entryType === 'LIMIT' ? '(ЛИМИТ)' : '(РЫНОК)'}`, price: trade.entry, color: 'blue' },
+   570→                  { label: 'СТОП-ЛОСС', price: trade.stopLoss, color: 'red' },
+   571→                  { label: 'TP1', price: trade.takeProfit1, color: 'emerald' },
+   572→                  { label: 'TP2', price: trade.takeProfit2, color: 'emerald' },
+   573→                  ...(trade.takeProfit3 > 0 ? [{ label: 'TP3', price: trade.takeProfit3, color: 'emerald' as const }] : []),
+   574→                ].map((level, i) => (
+   575→                  <div key={i} className={`flex items-center justify-between px-3 py-2 rounded-lg bg-${level.color}-500/10 border border-${level.color}-500/20`}>
+   576→                    <div className="flex items-center gap-2">
+   577→                      <div className={`w-2.5 h-2.5 rounded-full bg-${level.color}-500`} />
+   578→                      <span className={`text-[11px] font-semibold text-${level.color}-500`}>{level.label}</span>
+   579→                    </div>
+   580→                    <span className={`font-mono font-bold text-sm text-${level.color}-500`}>${formatPrice(level.price)}</span>
+   581→                  </div>
+   582→                ))}
+   583→              </div>
+   584→              {trade.entry > 0 && trade.stopLoss > 0 && (
+   585→                <div className="flex items-center justify-between pt-2 border-t border-zinc-200 dark:border-zinc-700 text-[11px]">
+   586→                  <span className="text-zinc-400">R:R</span>
+   587→                  <span className={`font-mono font-bold ${
+   588→                    Math.abs(trade.takeProfit1 - trade.entry) / Math.abs(trade.entry - trade.stopLoss) >= 2 ? 'text-emerald-500' : 'text-yellow-500'
+   589→                  }`}>1 : {(Math.abs(trade.takeProfit1 - trade.entry) / Math.abs(trade.entry - trade.stopLoss)).toFixed(2)}</span>
+   590→                </div>
+   591→              )}
+   592→            </div>
+   593→
+   594→            {/* Entry status / Unrealized P&L / Realized P&L */}
+   595→            {!trade.entryReached && (
+   596→              <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-4 space-y-2">
+   597→                <div className="text-[11px] font-bold text-blue-500 uppercase tracking-wider">Лимитный ордер</div>
+   598→                <div className="text-xs text-muted-foreground">Ожидание отката до ${formatPrice(trade.entry)}</div>
+   599→                {distToEntry !== null && (
+   600→                  <div className="flex items-center justify-between">
+   601→                    <span className="text-xs text-muted-foreground">До входа:</span>
+   602→                    <span className={`font-mono font-bold text-sm ${Math.abs(distToEntry) < 1 ? 'text-emerald-500' : 'text-blue-500'}`}>
+   603→                      {distToEntry > 0 ? '+' : ''}{distToEntry.toFixed(2)}%
+   604→                    </span>
+   605→                  </div>
+   606→                )}
+   607→                {currentPrice > 0 && (
+   608→                  <div className="flex items-center justify-between">
+   609→                    <span className="text-xs text-muted-foreground">Текущая:</span>
+   610→                    <span className="font-mono font-bold text-sm">${formatPrice(currentPrice)}</span>
+   611→                  </div>
+   612→                )}
+   613→              </div>
+   614→            )}
+   615→
+   616→            {!trade.resolved && trade.entryReached && unrealizedPnL !== null && (
+   617→              <div className={`rounded-xl border p-4 space-y-2 ${unrealizedPnL >= 0 ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+   618→                <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Нереализованный P&L</div>
+   619→                <div className="flex items-center justify-between">
+   620→                  <span className="text-xs text-muted-foreground">P&L:</span>
+   621→                  <span className={`font-mono font-black text-xl ${unrealizedPnL >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+   622→                    {unrealizedPnL >= 0 ? '+' : ''}{unrealizedPnL.toFixed(2)} USDT
+   623→                  </span>
+   624→                </div>
+   625→                {unrealizedPct !== null && (
+   626→                  <div className="flex items-center justify-between">
+   627→                    <span className="text-xs text-muted-foreground">Процент:</span>
+   628→                    <span className={`font-mono font-bold ${unrealizedPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+   629→                      {unrealizedPct >= 0 ? '+' : ''}{unrealizedPct.toFixed(1)}%
+   630→                    </span>
+   631→                  </div>
+   632→                )}
+   633→                {currentPrice > 0 && (
+   634→                  <div className="flex items-center justify-between pt-2 border-t border-border/30">
+   635→                    <span className="text-xs text-muted-foreground">Текущая:</span>
+   636→                    <span className="font-mono font-bold text-sm">${formatPrice(currentPrice)}</span>
+   637→                  </div>
+   638→                )}
+   639→              </div>
+   640→            )}
+   641→
+   642→            {trade.resolved && trade.pnlUSDT !== null && (
+   643→              <div className={`rounded-xl border p-4 space-y-2 ${trade.pnlUSDT >= 0 ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+   644→                <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Результат</div>
+   645→                <div className="flex items-center justify-between">
+   646→                  <span className="text-xs text-muted-foreground">P&L:</span>
+   647→                  <span className={`font-mono font-black text-xl ${trade.pnlUSDT >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+   648→                    {trade.pnlUSDT >= 0 ? '+' : ''}{trade.pnlUSDT.toFixed(2)} USDT
+   649→                  </span>
+   650→                </div>
+   651→                {trade.pnlPct !== null && (
+   652→                  <div className="flex items-center justify-between">
+   653→                    <span className="text-xs text-muted-foreground">Процент:</span>
+   654→                    <span className={`font-mono font-bold ${trade.pnlPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+   655→                      {trade.pnlPct >= 0 ? '+' : ''}{trade.pnlPct.toFixed(1)}%
+   656→                    </span>
+   657→                  </div>
+   658→                )}
+   659→                {trade.exitPrice !== null && (
+   660→                  <div className="flex items-center justify-between pt-2 border-t border-border/30">
+   661→                    <span className="text-xs text-muted-foreground">Цена выхода:</span>
+   662→                    <span className="font-mono font-bold text-sm">${formatPrice(trade.exitPrice)}</span>
+   663→                  </div>
+   664→                )}
+   665→                {trade.exitReason && (
+   666→                  <div className="text-xs text-muted-foreground pt-2 border-t border-border/30">{trade.exitReason}</div>
+   667→                )}
+   668→              </div>
+   669→            )}
+   670→
+   671→            {trade.entryReason && (
+   672→              <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 p-4">
+   673→                <div className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Причина входа</div>
+   674→                <div className="text-xs text-zinc-900 dark:text-zinc-100">{trade.entryReason}</div>
+   675→              </div>
+   676→            )}
+   677→            {trade.reasons.length > 0 && (
+   678→              <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 p-4">
+   679→                <div className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Факторы</div>
+   680→                <div className="space-y-1.5">
+   681→                  {trade.reasons.map((r, i) => (
+   682→                    <div key={i} className="flex items-start gap-2 text-xs">
+   683→                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 mt-0.5 flex-shrink-0" />
+   684→                      <span className="text-zinc-600 dark:text-zinc-300">{r}</span>
+   685→                    </div>
+   686→                  ))}
+   687→                </div>
+   688→              </div>
+   689→            )}
+   690→          </div>
+   691→        </div>
+   692→      </div>
+   693→    </div>
+   694→  );
+   695→}
+   696→
+   697→// Trade filter component
+   698→function TradeFilter({ trades, onTradeClick, onDeleteTrade }: { trades: Trade[]; onTradeClick: (trade: Trade) => void; onDeleteTrade: (tradeId: string) => void }) {
+   699→  const [filter, setFilter] = useState<'ALL' | 'OPEN' | 'WIN' | 'LOSS' | 'EXPIRED'>('ALL');
+   700→  const [coinFilter, setCoinFilter] = useState<string>('ALL');
+   701→  const uniqueCoins = [...new Set(trades.map(t => t.coinSymbol))].sort();
+   702→
+   703→  const filtered = trades.filter(t => {
+   704→    if (filter === 'OPEN' && t.resolved) return false;
+   705→    if (filter === 'WIN' && t.result !== 'WIN') return false;
+   706→    if (filter === 'LOSS' && t.result !== 'LOSS') return false;
+   707→    if (filter === 'EXPIRED' && t.result !== 'EXPIRED') return false;
+   708→    if (coinFilter !== 'ALL' && t.coinSymbol !== coinFilter) return false;
+   709→    return true;
+   710→  }).sort((a, b) => b.timestamp - a.timestamp);
+   711→
+   712→  return (
+   713→    <div>
+   714→      <div className="flex items-center gap-1 mb-2">
+   715→        {(['ALL', 'OPEN', 'WIN', 'LOSS', 'EXPIRED'] as const).map(f => (
+   716→          <button key={f} onClick={() => setFilter(f)} className={`px-2 py-0.5 text-[9px] rounded-md transition-colors ${
+   717→            filter === f ? 'bg-primary text-primary-foreground' : 'border border-border hover:bg-accent text-muted-foreground'
+   718→          }`}>
+   719→            {f === 'ALL' ? 'Все' : f === 'OPEN' ? 'Открытые' : f === 'WIN' ? 'Прибыль' : f === 'LOSS' ? 'Убыток' : 'Истёкшие'}
+   720→          </button>
+   721→        ))}
+   722→        {uniqueCoins.length > 1 && (
+   723→          <select value={coinFilter} onChange={e => setCoinFilter(e.target.value)} className="ml-2 px-2 py-0.5 text-[9px] rounded-md border border-border bg-card text-foreground">
+   724→            <option value="ALL">Все монеты</option>
+   725→            {uniqueCoins.map(c => <option key={c} value={c}>{c}</option>)}
+   726→          </select>
+   727→        )}
+   728→      </div>
+   729→      <TradeList trades={filtered} onTradeClick={onTradeClick} onDeleteTrade={onDeleteTrade} />
+   730→    </div>
+   731→  );
+   732→}
+   733→
+   734→// Trade list component
+   735→function TradeList({ trades, onTradeClick, onDeleteTrade }: { trades: Trade[]; onTradeClick: (trade: Trade) => void; onDeleteTrade: (tradeId: string) => void }) {
+   736→  if (trades.length === 0) {
+   737→    return (
+   738→      <div className="text-center py-8 text-muted-foreground text-xs">
+   739→        <Gauge className="w-8 h-8 mx-auto mb-2 opacity-30" />
+   740→        <p>Сделок ещё не было. Когда система выдаст сигнал, трейдер автоматически откроет позицию.</p>
+   741→      </div>
+   742→    );
+   743→  }
+   744→
+   745→  return (
+   746→    <div className="space-y-2">
+   747→      {trades.slice(0, 30).map(trade => (
+   748→        <div key={trade.id} onClick={() => onTradeClick(trade)} className={`rounded-xl border p-3 text-[11px] cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all ${
+   749→          trade.resolved ? (
+   750→            trade.result === 'WIN' ? 'border-emerald-500/30 bg-emerald-500/5 hover:border-emerald-500/50' :
+   751→            trade.result === 'LOSS' ? 'border-red-500/30 bg-red-500/5 hover:border-red-500/50' :
+   752→            'border-yellow-500/30 bg-yellow-500/5 hover:border-yellow-500/50'
+   753→          ) : 'border-blue-500/30 bg-blue-500/5 hover:border-blue-500/50'
+   754→        }`}>
+   755→          {/* Row 1: Direction, Coin, Status, Time */}
+   756→          <div className="flex items-center gap-2 mb-1.5">
+   757→            <span className={`w-7 h-7 rounded-lg flex items-center justify-center text-sm font-bold ${
+   758→              trade.direction === 'LONG' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-red-500/20 text-red-500'
+   759→            }`}>
+   760→              {trade.direction === 'LONG' ? '▲' : '▼'}
+   761→            </span>
+   762→            <div className="flex-1">
+   763→              <div className="flex items-center gap-2">
+   764→                <span className={`font-bold ${trade.direction === 'LONG' ? 'text-emerald-500' : 'text-red-500'}`}>
+   765→                  {trade.direction === 'LONG' ? 'ЛОНГ' : 'ШОРТ'}
+   766→                </span>
+   767→                <span className="font-semibold text-foreground">{trade.coinSymbol}/USDT</span>
+   768→                <Badge variant="outline" className="text-[8px]">{trade.timeframe}</Badge>
+   769→                <span className="text-muted-foreground">{trade.confidence}%</span>
+   770→              </div>
+   771→              <div className="text-[9px] text-muted-foreground">
+   772→                {new Date(trade.timestamp).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+   773→                {trade.enteredAt && trade.enteredAt !== trade.timestamp && (
+   774→                  <> → Вход: {new Date(trade.enteredAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</>
+   775→                )}
+   776→                {trade.closedAt && (
+   777→                  <> → Закрыт: {new Date(trade.closedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</>
+   778→                )}
+   779→              </div>
+   780→            </div>
+   781→            {!trade.resolved && <Badge className="text-[9px] bg-blue-500 text-white">АКТИВЕН</Badge>}
+   782→            {trade.resolved && trade.result === 'WIN' && <Badge className="text-[9px] bg-emerald-500 text-white">+ПРИБЫЛЬ</Badge>}
+   783→            {trade.resolved && trade.result === 'LOSS' && <Badge className="text-[9px] bg-red-500 text-white">-УБЫТОК</Badge>}
+   784→            {trade.resolved && trade.result === 'EXPIRED' && <Badge className="text-[9px] bg-yellow-500 text-white">ИСТЁК</Badge>}
+   785→          </div>
+   786→
+   787→          {/* Row 2: Position details */}
+   788→          <div className="grid grid-cols-4 gap-2 mb-1.5">
+   789→            <div className="bg-card/50 rounded-md px-2 py-1">
+   790→              <div className="text-[8px] text-muted-foreground">ВХОД</div>
+   791→              <div className="font-mono font-bold text-blue-500">${formatPrice(trade.entry)}</div>
+   792→              <div className="text-[8px] text-muted-foreground">{trade.entryType} {trade.entryType === 'LIMIT' && !trade.entryReached ? '(ждёт)' : ''}</div>
+   793→            </div>
+   794→            <div className="bg-card/50 rounded-md px-2 py-1">
+   795→              <div className="text-[8px] text-muted-foreground">СТОП-ЛОСС</div>
+   796→              <div className="font-mono font-bold text-red-500">${formatPrice(trade.stopLoss)}</div>
+   797→            </div>
+   798→            <div className="bg-card/50 rounded-md px-2 py-1">
+   799→              <div className="text-[8px] text-muted-foreground">ТЕЙК-ПРОФИТ</div>
+   800→              <div className="font-mono font-bold text-emerald-500">${formatPrice(trade.takeProfit1)}</div>
+   801→            </div>
+   802→            <div className="bg-card/50 rounded-md px-2 py-1">
+   803→              <div className="text-[8px] text-muted-foreground">ПОЗИЦИЯ</div>
+   804→              <div className="font-mono font-bold text-foreground">${trade.positionSize.toFixed(2)}</div>
+   805→              <div className="text-[8px] text-muted-foreground">{trade.leverage}x плечо</div>
+   806→            </div>
+   807→          </div>
+   808→
+   809→          {/* Row 3: Entry reason */}
+   810→          {trade.entryReason && (
+   811→            <div className="text-[10px] text-muted-foreground mb-1">
+   812→              <span className="font-semibold">Причина:</span> {trade.entryReason}
+   813→            </div>
+   814→          )}
+   815→
+   816→          {/* Row 4: Result & PnL */}
+   817→          {trade.resolved && (
+   818→            <div className={`flex items-center justify-between mt-1.5 pt-1.5 border-t ${
+   819→              trade.result === 'WIN' ? 'border-emerald-500/20' : trade.result === 'LOSS' ? 'border-red-500/20' : 'border-border/30'
+   820→            }`}>
+   821→              <div className="text-[10px] text-muted-foreground">
+   822→                {trade.exitReason}
+   823→              </div>
+   824→              {trade.pnlUSDT != null && (
+   825→                <div className="flex items-center gap-2">
+   826→                  <span className={`font-mono font-bold text-sm ${trade.pnlUSDT >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+   827→                    {trade.pnlUSDT >= 0 ? '+' : ''}{trade.pnlUSDT.toFixed(2)} USDT
+   828→                  </span>
+   829→                  {trade.pnlPct != null && (
+   830→                    <span className={`font-mono text-[10px] ${trade.pnlPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+   831→                      ({trade.pnlPct >= 0 ? '+' : ''}{trade.pnlPct.toFixed(1)}%)
+   832→                    </span>
+   833→                  )}
+   834→                </div>
+   835→              )}
+   836→            </div>
+   837→          )}
+   838→
+   839→          {/* Click hint + Delete button for open trades */}
+   840→          <div className="flex items-center justify-between mt-1.5 pt-1 border-t border-border/20">
+   841→            <span className="text-[9px] text-muted-foreground/50 flex items-center gap-1">
+   842→              <ExternalLink className="w-2.5 h-2.5" />
+   843→              Открыть в терминале
+   844→            </span>
+   845→            {!trade.resolved && (
+   846→              <button
+   847→                onClick={(e) => {
+   848→                  e.stopPropagation();
+   849→                  if (confirm(`Отменить сделку ${trade.coinSymbol}/USDT ${trade.direction}? Средства ($${trade.positionSize.toFixed(2)}) вернутся на депозит.`)) {
+   850→                    onDeleteTrade(trade.id);
+   851→                  }
+   852→                }}
+   853→                className="text-[9px] text-red-400 hover:text-red-500 flex items-center gap-1 px-2 py-0.5 rounded-md hover:bg-red-500/10 transition-colors"
+   854→                title="Отменить сделку"
+   855→              >
+   856→                <Trash2 className="w-3 h-3" />
+   857→                Отменить
+   858→              </button>
+   859→            )}
+   860→          </div>
+   861→        </div>
+   862→      ))}
+   863→    </div>
+   864→  );
+   865→}
+   866→
+   867→export default function CryptoDashboard() {
+   868→  const [coins, setCoins] = useState<CoinData[]>([]);
+   869→  const [selectedCoin, setSelectedCoin] = useState('bitcoin');
+   870→  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
+   871→  const [signal, setSignal] = useState<SignalResult | null>(null);
+   872→  const [tradeSignal, setTradeSignal] = useState<TradeSignal | null>(null);
+   873→  const [loading, setLoading] = useState(true);
+   874→  const [chartLoading, setChartLoading] = useState(false);
+   875→  const [interval, setInterval_] = useState('1h');
+   876→  const [searchQuery, setSearchQuery] = useState('');
+   877→  const [apiSource, setApiSource] = useState('');
+   878→  const [lastUpdate, setLastUpdate] = useState(Date.now());
+   879→  const [sentiment, setSentiment] = useState<SentimentData | null>(null);
+   880→  const [showIndicators, setShowIndicators] = useState(true);
+   881→  const [positionTool, setPositionTool] = useState<PositionTool>({ enabled: false, direction: 'LONG', entryPrice: 0, targetPrice: 0, stopLoss: 0, amount: 100, leverage: 1 });
+   882→  const [copied, setCopied] = useState(false);
+   883→  const [advisorAnalysis, setAdvisorAnalysis] = useState<string | null>(null);
+   884→  const [advisorLoading, setAdvisorLoading] = useState(false);
+   885→  const [advisorVisible, setAdvisorVisible] = useState(false);
+   886→  const [reputation, setReputation] = useState<ReputationData | null>(null);
+   887→  const [showReputationPanel, setShowReputationPanel] = useState(false);
+   888→  const [selectedTrade, setSelectedTrade] = useState<Trade | null>(null);
+   889→  const [depositAmount, setDepositAmount] = useState<string>('');
+   890→  const [depositLoading, setDepositLoading] = useState(false);
+   891→  const [scanResult, setScanResult] = useState<{ opportunities: any[] } | null>(null);
+   892→  const [scanLoading, setScanLoading] = useState(false);
+   893→  const [traderThinking, setTraderThinking] = useState<any>(null);
+   894→  const [showThinkingPanel, setShowThinkingPanel] = useState(false);
+   895→  const lastRecordedSignal = useRef<string>('');
+   896→  const chartRef = useRef<HTMLDivElement>(null);
+   897→  const abortRef = useRef<AbortController | null>(null);
+   898→
+   899→  const fetchMarketData = useCallback(async () => {
+   900→    try { const res = await fetch('/api/crypto/market'); if (res.ok) { const json = await res.json(); setCoins(json.data || []); setApiSource(json.source || ''); setLastUpdate(Date.now()); } } catch {} finally { setLoading(false); }
+   901→  }, []);
+   902→
+   903→  const fetchChartData = useCallback(async () => {
+   904→    if (!selectedCoin) return;
+   905→    if (abortRef.current) abortRef.current.abort();
+   906→    abortRef.current = new AbortController();
+   907→    setChartLoading(true);
+   908→    try {
+   909→      const res = await fetch(`/api/crypto/signals?coin=${selectedCoin}&interval=${interval}`, { signal: abortRef.current.signal });
+   910→      if (!res.ok) { setChartData([]); setSignal({ type: 'HOLD', strength: 0, indicators: [], summary: 'Данные недоступны' }); setTradeSignal(null); return; }
+   911→      const json = await res.json();
+   912→      setChartData(json.chartData || []);
+   913→      setSignal(json.signal || null);
+   914→      setTradeSignal(json.tradeSignal || null);
+   915→      setApiSource(json.source || apiSource);
+   916→    } catch { setChartData([]); setTradeSignal(null); } finally { setChartLoading(false); }
+   917→  }, [selectedCoin, interval, apiSource]);
+   918→
+   919→  const fetchSentiment = useCallback(async () => {
+   920→    try { const res = await fetch('/api/crypto/sentiment'); if (res.ok) setSentiment(await res.json()); } catch {}
+   921→  }, []);
+   922→
+   923→  const fetchReputation = useCallback(async () => {
+   924→    try { const res = await fetch('/api/crypto/reputation'); if (res.ok) setReputation(await res.json()); } catch {}
+   925→  }, []);
+   926→
+   927→  // Helper: record trader's thought
+   928→  const recordThought = useCallback(async (thought: any) => {
+   929→    try {
+   930→      await fetch('/api/crypto/trader-thinking', {
+   931→        method: 'POST',
+   932→        headers: { 'Content-Type': 'application/json' },
+   933→        body: JSON.stringify(thought),
+   934→      });
+   935→    } catch {}
+   936→  }, []);
+   937→
+   938→  // Fetch trader's thinking log
+   939→  const fetchThinking = useCallback(async () => {
+   940→    try {
+   941→      const res = await fetch('/api/crypto/trader-thinking');
+   942→      if (res.ok) {
+   943→        const data = await res.json();
+   944→        setTraderThinking(data);
+   945→      }
+   946→    } catch {}
+   947→  }, []);
+   948→
+   949→  // Full intraday trader: scan, analyze, open multiple positions, think out loud
+   950→  const scanAndTrade = useCallback(async () => {
+   951→    setScanLoading(true);
+   952→    try {
+   953→      // Step 1: Get current reputation (balance, open positions)
+   954→      let repData: any = null;
+   955→      try {
+   956→        const repRes = await fetch('/api/crypto/reputation');
+   957→        if (repRes.ok) repData = await repRes.json();
+   958→      } catch {}
+   959→
+   960→      const freeBalance = repData?.freeBalance || 0;
+   961→      const openPositions = (repData?.trades || []).filter((t: any) => !t.resolved).length;
+   962→      const lockedMargin = repData?.lockedInPositions || 0;
+   963→      const totalEquity = repData?.balance + lockedMargin + (repData?.trades || []).filter((t: any) => !t.resolved && t.entryReached).reduce((s: number, t: any) => {
+   964→        if (!repData?.trades) return s;
+   965→        return s; // Simplified — unrealized PnL shown in equity already
+   966→      }, 0);
+   967→
+   968→      // Step 2: Scan market for opportunities
+   969→      const res = await fetch('/api/crypto/scan');
+   970→      if (!res.ok) {
+   971→        await recordThought({
+   972→          type: 'scan', title: 'Скан рынка не удался',
+   973→          detail: 'Не удалось получить данные сканера. Пропускаю цикл.',
+   974→          emotion: 'worried', tags: ['error', 'scan'],
+   975→          openPositionsCount: openPositions, freeBalance, totalEquity: freeBalance + lockedMargin,
+   976→        });
+   977→        return;
+   978→      }
+   979→
+   980→      const data = await res.json();
+   981→      setScanResult(data);
+   982→      const allOpps = data.opportunities || [];
+   983→      const minConfidence = data.adaptiveRules?.minConfidence || 60;
+   984→      const minRr = data.adaptiveRules?.minRr || 1.5;
+   985→
+   986→      // Step 3: Think — analyze market situation
+   987→      const bullishOpps = allOpps.filter((o: any) => o.direction === 'LONG');
+   988→      const bearishOpps = allOpps.filter((o: any) => o.direction === 'SHORT');
+   989→      const marketView = bullishOpps.length > bearishOpps.length * 1.5 ? 'Бычий'
+   990→        : bearishOpps.length > bullishOpps.length * 1.5 ? 'Медвежий' : 'Нейтральный';
+   991→
+   992→      // Record scan observation
+   993→      await recordThought({
+   994→        type: 'scan',
+   995→        title: `Скан: ${allOpps.length} сигналов (${bullishOpps.length} LONG, ${bearishOpps.length} SHORT)`,
+   996→        detail: `Рынок: ${marketView}. Свободных средств: $${freeBalance.toFixed(2)}. Открытых позиций: ${openPositions}/5. Лучший сигнал: ${allOpps[0]?.symbol || 'нет'} (${allOpps[0]?.score?.toFixed(0) || 0} очков, ${allOpps[0]?.direction || '-'})`,
+   997→        emotion: allOpps.length > 0 ? 'analytical' : 'cautious',
+   998→        tags: ['scan', 'market_analysis'],
+   999→        marketView,
+  1000→        openPositionsCount: openPositions,
+  1001→        freeBalance,
+  1002→        totalEquity: freeBalance + lockedMargin,
+  1003→      });
+  1004→
+  1005→      // Step 4: Decide — how many positions can we open?
+  1006→      const maxPositions = 5;
+  1007→      const slotsAvailable = maxPositions - openPositions;
+  1008→      if (slotsAvailable <= 0) {
+  1009→        await recordThought({
+  1010→          type: 'decision', title: 'Максимум позиций',
+  1011→          detail: `Уже открыто ${openPositions} позиций — максимум 5. Жду закрытия.`,
+  1012→          emotion: 'cautious', tags: ['max_positions', 'wait'],
+  1013→          openPositionsCount: openPositions, freeBalance, totalEquity: freeBalance + lockedMargin,
+  1014→        });
+  1015→        return;
+  1016→      }
+  1017→
+  1018→      if (freeBalance < 3) {
+  1019→        await recordThought({
+  1020→          type: 'decision', title: 'Недостаточно средств',
+  1021→          detail: `Свободный баланс $${freeBalance.toFixed(2)} — слишком мало для входа. Минимум $3.`,
+  1022→          emotion: 'worried', tags: ['low_balance'],
+  1023→          openPositionsCount: openPositions, freeBalance, totalEquity: freeBalance + lockedMargin,
+  1024→        });
+  1025→        return;
+  1026→      }
+  1027→
+  1028→      // Step 5: Filter valid opportunities — INTRADAY TRADER opens MULTIPLE positions
+  1029→      const validOpps = allOpps.filter((o: any) => {
+  1030→        if (o.confidence < minConfidence * 0.7) return false;
+  1031→        if (o.score < 25) return false;
+  1032→        if (o.riskReward < minRr * 0.7) return false;
+  1033→        return true;
+  1034→      });
+  1035→
+  1036→      if (validOpps.length === 0) {
+  1037→        await recordThought({
+  1038→          type: 'decision', title: 'Нет подходящих сигналов',
+  1039→          detail: `Из ${allOpps.length} сигналов ни один не прошёл фильтры (confidence≥${(minConfidence * 0.7).toFixed(0)}%, score≥25, R:R≥${(minRr * 0.7).toFixed(1)}). Лучший: ${allOpps[0]?.symbol || 'нет'} (${allOpps[0]?.score?.toFixed(0) || 0} очков)`,
+  1040→          emotion: 'cautious', tags: ['no_signals', 'filter'],
+  1041→          openPositionsCount: openPositions, freeBalance, totalEquity: freeBalance + lockedMargin,
+  1042→        });
+  1043→        return;
+  1044→      }
+  1045→
+  1046→      // Step 6: Open positions — as many as possible with available funds
+  1047→      let openedCount = 0;
+  1048→      const maxToTry = Math.min(slotsAvailable, 3); // Try up to 3 new positions per scan cycle
+  1049→      const attemptedSymbols: string[] = [];
+  1050→      const rejectedSymbols: string[] = [];
+  1051→
+  1052→      for (const opp of validOpps.slice(0, maxToTry + 2)) { // Try a few extra in case some get rejected
+  1053→        if (openedCount >= maxToTry) break;
+  1054→        if (freeBalance - openedCount * (freeBalance * 0.12) < 3) break; // Not enough for more
+  1055→
+  1056→        const isMarketPreferred = opp.confidence >= 75 ||
+  1057→          Math.abs(opp.price - opp.entry) / opp.price * 100 < 0.15 ||
+  1058→          (opp.reasons || []).some((r: string) => r.includes('пробой') || r.includes('breakout'));
+  1059→
+  1060→        try {
+  1061→          const tradeRes = await fetch('/api/crypto/reputation', {
+  1062→            method: 'POST',
+  1063→            headers: { 'Content-Type': 'application/json' },
+  1064→            body: JSON.stringify({
+  1065→              coinId: opp.coinId,
+  1066→              coinSymbol: opp.symbol,
+  1067→              direction: opp.direction,
+  1068→              entryType: isMarketPreferred ? 'MARKET' : 'LIMIT',
+  1069→              entry: opp.entry,
+  1070→              stopLoss: opp.stopLoss,
+  1071→              takeProfit1: opp.takeProfit1,
+  1072→              takeProfit2: opp.direction === 'LONG'
+  1073→                ? opp.takeProfit1 + (opp.takeProfit1 - opp.entry) * 0.5
+  1074→                : opp.takeProfit1 - (opp.entry - opp.takeProfit1) * 0.5,
+  1075→              takeProfit3: opp.direction === 'LONG'
+  1076→                ? opp.takeProfit1 + (opp.takeProfit1 - opp.entry)
+  1077→                : opp.takeProfit1 - (opp.entry - opp.takeProfit1),
+  1078→              currentPrice: opp.price,
+  1079→              confidence: opp.confidence,
+  1080→              timeframe: opp.timeframe,
+  1081→              entryReason: opp.entryReason,
+  1082→              reasons: opp.reasons,
+  1083→              leverage: 3,
+  1084→            }),
+  1085→          });
+  1086→
+  1087→          if (tradeRes.ok) {
+  1088→            const tradeData = await tradeRes.json();
+  1089→            if (tradeData.success) {
+  1090→              openedCount++;
+  1091→              attemptedSymbols.push(opp.symbol);
+  1092→              await recordThought({
+  1093→                type: 'decision',
+  1094→                title: `ОТКРЫТА позиция: ${opp.symbol} ${opp.direction}`,
+  1095→                detail: `${isMarketPreferred ? 'РЫНОЧНЫЙ' : 'ЛИМИТНЫЙ'} вход на $${opp.price?.toFixed(2)}. Confidence: ${opp.confidence}%, Score: ${opp.score?.toFixed(0)}, R:R: ${opp.riskReward?.toFixed(2)}. SL: $${opp.stopLoss?.toFixed(2)}, TP1: $${opp.takeProfit1?.toFixed(2)}. Причина: ${opp.entryReason || opp.reasons?.join(', ') || 'технический сигнал'}`,
+  1096→                coinSymbol: opp.symbol, coinId: opp.coinId,
+  1097→                direction: opp.direction, confidence: opp.confidence,
+  1098→                score: opp.score, tradeId: tradeData.tradeId,
+  1099→                entryType: isMarketPreferred ? 'MARKET' : 'LIMIT',
+  1100→                emotion: opp.confidence >= 75 ? 'confident' : 'analytical',
+  1101→                tags: ['open_position', opp.direction.toLowerCase(), isMarketPreferred ? 'market' : 'limit'],
+  1102→                openPositionsCount: openPositions + openedCount,
+  1103→                freeBalance: freeBalance - openedCount * (freeBalance * 0.12),
+  1104→                totalEquity: freeBalance + lockedMargin,
+  1105→              });
+  1106→            } else {
+  1107→              rejectedSymbols.push(`${opp.symbol}(${tradeData.reason})`);
+  1108→            }
+  1109→          }
+  1110→          fetchReputation();
+  1111→        } catch {}
+  1112→      }
+  1113→
+  1114→      // Step 7: Summary thought
+  1115→      if (openedCount > 0) {
+  1116→        await recordThought({
+  1117→          type: 'observation',
+  1118→          title: `Цикл завершён: открыто ${openedCount} позиций`,
+  1119→          detail: `Открыты: ${attemptedSymbols.join(', ')}. ${rejectedSymbols.length > 0 ? `Отклонены: ${rejectedSymbols.join(', ')}` : ''}. Рынок: ${marketView}. Свободных средств осталось ~$${(freeBalance - openedCount * freeBalance * 0.12).toFixed(2)}`,
+  1120→          emotion: openedCount >= 2 ? 'confident' : 'satisfied',
+  1121→          tags: ['cycle_summary', `${openedCount}_opened`],
+  1122→          openPositionsCount: openPositions + openedCount,
+  1123→          freeBalance: freeBalance - openedCount * freeBalance * 0.12,
+  1124→          totalEquity: freeBalance + lockedMargin,
+  1125→          marketView,
+  1126→        });
+  1127→      } else if (rejectedSymbols.length > 0) {
+  1128→        await recordThought({
+  1129→          type: 'observation',
+  1130→          title: `Цикл завершён: все сигналы отклонены`,
+  1131→          detail: `Причины: ${rejectedSymbols.join('; ')}. Жду следующий цикл.`,
+  1132→          emotion: 'cautious', tags: ['cycle_summary', 'all_rejected'],
+  1133→          openPositionsCount: openPositions, freeBalance, totalEquity: freeBalance + lockedMargin,
+  1134→        });
+  1135→      }
+  1136→
+  1137→      // Refresh thinking panel
+  1138→      fetchThinking();
+  1139→    } catch {} finally {
+  1140→      setScanLoading(false);
+  1141→    }
+  1142→  }, [fetchReputation, recordThought, fetchThinking]);
+  1143→
+  1144→  // Deposit funds as credit
+  1145→  const depositFunds = useCallback(async () => {
+  1146→    const amount = parseFloat(depositAmount);
+  1147→    if (!amount || amount <= 0) return;
+  1148→    setDepositLoading(true);
+  1149→    try {
+  1150→      const res = await fetch('/api/crypto/reputation', {
+  1151→        method: 'PUT',
+  1152→        headers: { 'Content-Type': 'application/json' },
+  1153→        body: JSON.stringify({ amount, label: `Кредит #${(reputation?.debtHistory?.length || 0) + 1}` }),
+  1154→      });
+  1155→      if (res.ok) {
+  1156→        setDepositAmount('');
+  1157→        fetchReputation();
+  1158→      }
+  1159→    } catch {} finally {
+  1160→      setDepositLoading(false);
+  1161→    }
+  1162→  }, [depositAmount, fetchReputation, reputation]);
+  1163→
+  1164→  // Delete/cancel a trade, return funds to balance
+  1165→  const deleteTrade = useCallback(async (tradeId: string) => {
+  1166→    try {
+  1167→      const res = await fetch('/api/crypto/reputation', {
+  1168→        method: 'PATCH',
+  1169→        headers: { 'Content-Type': 'application/json' },
+  1170→        body: JSON.stringify({ tradeId }),
+  1171→      });
+  1172→      if (res.ok) {
+  1173→        fetchReputation();
+  1174→      }
+  1175→    } catch {}
+  1176→  }, [fetchReputation]);
+  1177→
+  1178→  // Record signal to reputation system whenever a new actionable signal arrives
+  1179→  const recordSignal = useCallback(async (ts: TradeSignal, coinId: string, coinSymbol: string) => {
+  1180→    if (!ts || ts.direction === 'FLAT') return;
+  1181→    try {
+  1182→      await fetch('/api/crypto/reputation', {
+  1183→        method: 'POST',
+  1184→        headers: { 'Content-Type': 'application/json' },
+  1185→        body: JSON.stringify({
+  1186→          coinId,
+  1187→          coinSymbol,
+  1188→          direction: ts.direction,
+  1189→          entryType: ts.entryType || 'LIMIT',
+  1190→          entry: ts.entry,
+  1191→          stopLoss: ts.stopLoss,
+  1192→          takeProfit1: ts.takeProfit1,
+  1193→          takeProfit2: ts.takeProfit2,
+  1194→          takeProfit3: ts.takeProfit3,
+  1195→          currentPrice: ts.currentPrice,
+  1196→          confidence: ts.confidence,
+  1197→          timeframe: interval,
+  1198→          entryReason: ts.entryReason || '',
+  1199→          reasons: ts.reasons || [],
+  1200→          leverage: 3,
+  1201→        }),
+  1202→      });
+  1203→      fetchReputation(); // Refresh reputation after recording
+  1204→    } catch {}
+  1205→  }, [fetchReputation]);
+  1206→
+  1207→  const fetchAdvisor = useCallback(async () => {
+  1208→    if (!tradeSignal || !selectedCoin) return;
+  1209→    setAdvisorLoading(true);
+  1210→    setAdvisorVisible(true);
+  1211→    try {
+  1212→      const indicatorStr = signal?.indicators?.map(i => `${i.name}: ${i.value} (${i.signal}) ${i.description}`).join('; ') || '';
+  1213→      const params = new URLSearchParams({
+  1214→        coin: selectedCoin,
+  1215→        direction: tradeSignal.direction,
+  1216→        confidence: String(tradeSignal.confidence),
+  1217→        entry: String(tradeSignal.entry),
+  1218→        stopLoss: String(tradeSignal.stopLoss),
+  1219→        tp1: String(tradeSignal.takeProfit1),
+  1220→        tp2: String(tradeSignal.takeProfit2),
+  1221→        tp3: String(tradeSignal.takeProfit3),
+  1222→        trend: tradeSignal.trend,
+  1223→        momentum: tradeSignal.momentum,
+  1224→        reasons: tradeSignal.reasons.join('; '),
+  1225→        warnings: tradeSignal.warnings.join('; '),
+  1226→        candlePattern: tradeSignal.candlePattern || '',
+  1227→        volumeSignal: tradeSignal.volumeSignal || '',
+  1228→        support: String(tradeSignal.support),
+  1229→        resistance: String(tradeSignal.resistance),
+  1230→        atr: String(tradeSignal.atr),
+  1231→        holdDuration: tradeSignal.holdDuration,
+  1232→        indicators: indicatorStr,
+  1233→      });
+  1234→      const res = await fetch(`/api/crypto/advisor?${params}`);
+  1235→      if (res.ok) {
+  1236→        const json = await res.json();
+  1237→        setAdvisorAnalysis(json.analysis || null);
+  1238→      } else {
+  1239→        setAdvisorAnalysis('Не удалось получить анализ. Попробуйте позже.');
+  1240→      }
+  1241→    } catch {
+  1242→      setAdvisorAnalysis('Ошибка подключения к AI-советчику.');
+  1243→    } finally {
+  1244→      setAdvisorLoading(false);
+  1245→    }
+  1246→  }, [tradeSignal, selectedCoin, signal]);
+  1247→
+  1248→  useEffect(() => { if (tradeSignal && tradeSignal.direction !== 'FLAT') { const entry = tradeSignal.currentPrice || tradeSignal.entry; if (positionTool.enabled && entry > 0) { const isLong = tradeSignal.direction !== 'SHORT'; setPositionTool(p => ({ ...p, entryPrice: entry, targetPrice: tradeSignal.takeProfit2 || entry * (isLong ? 1.05 : 0.95), stopLoss: tradeSignal.stopLoss || entry * (isLong ? 0.97 : 1.03) })); } } }, [selectedCoin, interval]); // eslint-disable-line
+  1249→
+  1250→  useEffect(() => { fetchMarketData(); fetchSentiment(); fetchReputation(); }, [fetchMarketData, fetchSentiment, fetchReputation]);
+  1251→  useEffect(() => { fetchChartData(); }, [fetchChartData]);
+  1252→  // Record signal to reputation when a new actionable signal arrives (with dedup)
+  1253→  useEffect(() => {
+  1254→    if (tradeSignal && tradeSignal.direction !== 'FLAT') {
+  1255→      const sigKey = `${selectedCoin}-${tradeSignal.direction}-${tradeSignal.entry.toFixed(2)}-${tradeSignal.confidence}`;
+  1256→      if (sigKey !== lastRecordedSignal.current) {
+  1257→        lastRecordedSignal.current = sigKey;
+  1258→        const sym = coins.find(c => c.id === selectedCoin)?.symbol || selectedCoin.toUpperCase();
+  1259→        recordSignal(tradeSignal, selectedCoin, sym);
+  1260→      }
+  1261→    }
+  1262→  }, [tradeSignal?.direction, tradeSignal?.entry, selectedCoin]); // eslint-disable-line
+  1263→  useEffect(() => { const iv = setInterval(() => { fetchMarketData(); fetchChartData(); fetchSentiment(); fetchReputation(); fetchThinking(); }, 45000); return () => clearInterval(iv); }, [fetchMarketData, fetchChartData, fetchSentiment, fetchReputation, fetchThinking]);
+  1264→  // Auto-scan for best trades every 60s — intraday trader needs frequent scans
+  1265→  useEffect(() => { scanAndTrade(); fetchThinking(); const iv = setInterval(scanAndTrade, 60000); return () => clearInterval(iv); }, [scanAndTrade, fetchThinking]);
+  1266→
+  1267→  const filteredCoins = coins.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.symbol.toLowerCase().includes(searchQuery.toLowerCase()));
+  1268→  const selectedCoinData = coins.find(c => c.id === selectedCoin);
+  1269→  const priceChange24h = selectedCoinData?.price_change_percentage_24h || 0;
+  1270→  const displayPrice = selectedCoinData?.current_price || chartData[chartData.length - 1]?.close || 0;
+  1271→  const ts = tradeSignal;
+  1272→
+  1273→  // Copy trade signal to clipboard
+  1274→  const copyTrade = useCallback(() => {
+  1275→    if (!ts || ts.direction === 'FLAT') return;
+  1276→    const text = `${ts.direction === 'LONG' ? '🟢 ЛОНГ' : '🔴 ШОРТ'} ${(selectedCoinData?.symbol || selectedCoin).toUpperCase()}/USDT\n` +
+  1277→      `📊 Уверенность: ${ts.confidence}%\n` +
+  1278→      `💰 Вход: $${formatPrice(ts.entry)}\n` +
+  1279→      `🛑 Стоп-лосс: $${formatPrice(ts.stopLoss)} (${pctChange(ts.entry, ts.stopLoss)})\n` +
+  1280→      `🎯 TP1: $${formatPrice(ts.takeProfit1)} (${pctChange(ts.entry, ts.takeProfit1)})\n` +
+  1281→      `🎯 TP2: $${formatPrice(ts.takeProfit2)} (${pctChange(ts.entry, ts.takeProfit2)})\n` +
+  1282→      `🎯 TP3: $${formatPrice(ts.takeProfit3)} (${pctChange(ts.entry, ts.takeProfit3)})\n` +
+  1283→      `📐 R:R = ${ts.riskReward.toFixed(2)}\n` +
+  1284→      `⏱ Удержание: ${ts.holdDuration}\n` +
+  1285→      `📈 Тренд: ${ts.trend} | Импульс: ${ts.momentum}\n` +
+  1286→      `${ts.candlePattern ? `🕯 Паттерн: ${ts.candlePattern}\n` : ''}` +
+  1287→      `✅ ${ts.reasons.slice(0, 3).join(' | ')}`;
+  1288→    navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+  1289→  }, [ts, selectedCoinData, selectedCoin]);
+  1290→
+  1291→  // Generate step-by-step trade plan
+  1292→  const getTradeSteps = (): string[] => {
+  1293→    if (!ts || ts.direction === 'FLAT') return [];
+  1294→    const steps: string[] = [];
+  1295→    steps.push(`1. Открыть ${ts.direction === 'LONG' ? 'ЛОНГ' : 'ШОРТ'} по рынку @ $${formatPrice(ts.entry)}`);
+  1296→    steps.push(`2. Установить стоп-лосс: $${formatPrice(ts.stopLoss)}`);
+  1297→    steps.push(`3. Цель TP1 (фиксация 30%): $${formatPrice(ts.takeProfit1)}`);
+  1298→    steps.push(`4. Цель TP2 (фиксация 50%): $${formatPrice(ts.takeProfit2)}`);
+  1299→    steps.push(`5. Цель TP3 (остаток): $${formatPrice(ts.takeProfit3)}`);
+  1300→    steps.push(`6. Удержание: ${ts.holdDuration}`);
+  1301→    if (ts.direction === 'LONG') {
+  1302→      steps.push(`7. Если пробит стоп $${formatPrice(ts.stopLoss)} — закрыть позицию без раздумий`);
+  1303→    } else {
+  1304→      steps.push(`7. Если пробит стоп $${formatPrice(ts.stopLoss)} — закрыть позицию без раздумий`);
+  1305→    }
+  1306→    return steps;
+  1307→  };
+  1308→
+  1309→  return (
+  1310→    <div className="min-h-screen bg-background">
+  1311→      <header className="sticky top-0 z-50 bg-card/80 backdrop-blur-xl border-b border-border">
+  1312→        <div className="max-w-[1700px] mx-auto px-4 py-2.5 flex items-center justify-between gap-4">
+  1313→          <div className="flex items-center gap-3">
+  1314→            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center"><BarChart3 className="w-5 h-5 text-white" /></div>
+  1315→            <div><h1 className="text-lg font-bold tracking-tight">IntraTrade Pro</h1><p className="text-[10px] text-muted-foreground">Внутридневной торговый терминал</p></div>
+  1316→          </div>
+  1317→          <div className="flex items-center gap-3">
+  1318→            {reputation && (
+  1319→              <button onClick={() => setShowReputationPanel(!showReputationPanel)} className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-purple-500/30 bg-purple-500/5 hover:bg-purple-500/10 transition-colors cursor-pointer">
+  1320→                <span className="text-sm">{reputation.levelEmoji}</span>
+  1321→                <span className="text-[10px] font-bold text-purple-500">{reputation.level}</span>
+  1322→                <span className="text-[10px] font-mono font-bold text-foreground">${(reputation.freeBalance + (reputation.lockedInPositions || 0)).toFixed(0)}</span>
+  1323→                <span className={`text-[9px] font-mono font-bold ${reputation.totalPnl >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+  1324→                  {reputation.totalPnl >= 0 ? '+' : ''}{(((reputation.freeBalance + (reputation.lockedInPositions || 0)) / reputation.initialDeposit - 1) * 100).toFixed(0)}%
+  1325→                </span>
+  1326→                {reputation.streak !== 0 && <span className={`text-[9px] font-bold ${reputation.streak > 0 ? 'text-emerald-500' : 'text-red-500'}`}>{reputation.streak > 0 ? `${reputation.streak}W` : `${Math.abs(reputation.streak)}L`}</span>}
+  1327→              </button>
+  1328→            )}
+  1329→            <button onClick={() => setShowThinkingPanel(!showThinkingPanel)} className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border transition-colors cursor-pointer ${showThinkingPanel ? 'border-amber-500/50 bg-amber-500/10' : 'border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10'}`}>
+  1330→              <Brain className="w-3.5 h-3.5 text-amber-500" />
+  1331→              <span className="text-[10px] font-bold text-amber-500">Мышление</span>
+  1332→              {traderThinking?.thoughts?.length > 0 && <span className="text-[9px] font-mono text-amber-400">{traderThinking.thoughts.length}</span>}
+  1333→            </button>
+  1334→            {ts && ts.direction !== 'FLAT' && (
+  1335→              <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full border ${ts.direction === 'LONG' ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-red-500/50 bg-red-500/10'}`}>
+  1336→                {ts.direction === 'LONG' ? <TrendingUp className="w-4 h-4 text-emerald-500" /> : <TrendingDown className="w-4 h-4 text-red-500" />}
+  1337→                <span className={`text-sm font-bold ${ts.direction === 'LONG' ? 'text-emerald-500' : 'text-red-500'}`}>{ts.direction === 'LONG' ? 'ЛОНГ' : 'ШОРТ'}</span>
+  1338→                <span className="text-xs text-muted-foreground">{ts.confidence}%</span>
+  1339→              </div>
+  1340→            )}
+  1341→            {sentiment && <div className="hidden md:flex items-center gap-1.5 text-xs"><Gauge className="w-4 h-4 text-orange-500" /><span className="text-orange-500">{sentiment.fearGreed.value}</span></div>}
+  1342→            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground"><Clock className="w-3 h-3" />{formatTimeAgo(lastUpdate)}</div>
+  1343→            <Button variant="outline" size="sm" onClick={() => { fetchMarketData(); fetchChartData(); fetchSentiment(); }} className="gap-1 h-7"><RefreshCw className="w-3 h-3" /></Button>
+  1344→          </div>
+  1345→        </div>
+  1346→      </header>
+  1347→
+  1348→      <main className="max-w-[1700px] mx-auto px-4 py-3">
+  1349→        <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-3">
+  1350→          {/* Coin List */}
+  1351→          <div className="space-y-2">
+  1352→            <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" /><Input placeholder="Поиск монеты..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-9 h-8 text-sm" /></div>
+  1353→            <Card className="overflow-hidden"><CardContent className="p-0"><ScrollArea className="h-[calc(100vh-140px)]">
+  1354→              {loading ? <div className="p-3 space-y-2">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="flex items-center gap-2 animate-pulse"><div className="w-7 h-7 bg-muted rounded-full" /><div className="flex-1 space-y-1"><div className="h-3 w-16 bg-muted rounded" /></div></div>)}</div>
+  1355→              : <div className="divide-y divide-border">{filteredCoins.map(coin => (
+  1356→                <button key={coin.id} onClick={() => setSelectedCoin(coin.id)} className={`w-full flex items-center gap-2 px-2.5 py-2 hover:bg-accent/50 transition-colors text-left ${selectedCoin === coin.id ? 'bg-accent' : ''}`}>
+  1357→                  <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center overflow-hidden flex-shrink-0">
+  1358→                    {coin.image ? <img src={coin.image} alt="" className="w-5 h-5" onError={e => {(e.target as HTMLImageElement).style.display='none'}} /> : <span className="text-[9px] font-bold">{coin.symbol.slice(0,2)}</span>}
+  1359→                  </div>
+  1360→                  <div className="flex-1 min-w-0"><div className="flex items-center gap-1"><span className="font-medium text-xs truncate">{coin.symbol}</span></div><div className="text-[11px] font-mono">${formatPrice(coin.current_price)}</div></div>
+  1361→                  <div className="text-right flex-shrink-0"><div className={`text-[10px] font-semibold flex items-center gap-0.5 ${(coin.price_change_percentage_24h||0)>=0?'text-emerald-500':'text-red-500'}`}>{(coin.price_change_percentage_24h||0)>=0?<ArrowUpRight className="w-2.5 h-2.5"/>:<ArrowDownRight className="w-2.5 h-2.5"/>}{Math.abs(coin.price_change_percentage_24h||0).toFixed(2)}{'%'}</div></div>
+  1362→                </button>))}</div>}
+  1363→            </ScrollArea></CardContent></Card>
+  1364→          </div>
+  1365→
+  1366→          {/* Main Panel */}
+  1367→          <div className="space-y-3">
+  1368→
+  1369→            {/* ====== TRADE SIGNAL BANNER — MAIN FEATURE ====== */}
+  1370→            {ts && ts.direction !== 'FLAT' && (
+  1371→              <Card className={`border-2 overflow-hidden ${ts.direction === 'LONG' ? 'border-emerald-500/70 bg-gradient-to-r from-emerald-500/5 to-transparent' : 'border-red-500/70 bg-gradient-to-r from-red-500/5 to-transparent'}`}>
+  1372→                <CardContent className="p-0">
+  1373→                  {/* Top: Signal Header */}
+  1374→                  <div className={`px-4 py-3 ${ts.direction === 'LONG' ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
+  1375→                    <div className="flex items-center justify-between">
+  1376→                      <div className="flex items-center gap-3">
+  1377→                        <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${ts.direction === 'LONG' ? 'bg-emerald-500/20' : 'bg-red-500/20'}`}>
+  1378→                          {ts.direction === 'LONG' ? <MoveUp className="w-8 h-8 text-emerald-500" /> : <MoveDown className="w-8 h-8 text-red-500" />}
+  1379→                        </div>
+  1380→                        <div>
+  1381→                          <div className={`text-3xl font-black tracking-tight ${ts.direction === 'LONG' ? 'text-emerald-500' : 'text-red-500'}`}>
+  1382→                            {ts.direction === 'LONG' ? 'ЛОНГ' : 'ШОРТ'}
+  1383→                          </div>
+  1384→                          <div className="flex items-center gap-2 mt-0.5">
+  1385→                            <Badge variant="outline" className="text-[10px]"><Zap className="w-2.5 h-2.5 mr-0.5"/>{ts.confidence}%</Badge>
+  1386→                            <Badge variant="outline" className={`text-[10px] ${ts.trend === 'BULLISH' ? 'text-emerald-500' : ts.trend === 'BEARISH' ? 'text-red-500' : 'text-yellow-500'}`}>{ts.trend === 'BULLISH' ? '▲' : ts.trend === 'BEARISH' ? '▼' : '→'} {ts.trend}</Badge>
+  1387→                            <Badge variant="outline" className="text-[10px]">{ts.momentum === 'STRONG' ? <Flame className="w-2.5 h-2.5 mr-0.5 text-orange-500" /> : <Snowflake className="w-2.5 h-2.5 mr-0.5 text-blue-400" />}{ts.momentum}</Badge>
+  1388→                            {ts.candlePattern && <Badge className="text-[10px] bg-amber-500/20 text-amber-500 border-amber-500/30">🕯 {ts.candlePattern}</Badge>}
+  1389→                          </div>
+  1390→                          <Progress value={ts.confidence} className={`h-1.5 mt-1.5 w-40 ${ts.direction === 'LONG' ? '[&>div]:bg-emerald-500' : '[&>div]:bg-red-500'}`} />
+  1391→                        </div>
+  1392→                      </div>
+  1393→                      <div className="flex flex-col items-end gap-1">
+  1394→                        <Button variant="outline" size="sm" onClick={copyTrade} className="gap-1.5 h-7 text-xs">
+  1395→                          {copied ? <><Check className="w-3 h-3" /> Скопировано!</> : <><Copy className="w-3 h-3" /> Скопировать</>}
+  1396→                        </Button>
+  1397→                        <span className="text-[9px] text-muted-foreground">{(selectedCoinData?.symbol || selectedCoin).toUpperCase()}/USDT</span>
+  1398→                      </div>
+  1399→                    </div>
+  1400→                  </div>
+  1401→
+  1402→                  {/* Middle: Price Levels */}
+  1403→                  <div className="px-4 py-3 border-t border-border/50">
+  1404→                    {/* Entry type banner */}
+  1405→                    {ts.entryType === 'LIMIT' && (
+  1406→                      <div className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-md bg-blue-500/10 border border-blue-500/20">
+  1407→                        <Target className="w-3 h-3 text-blue-500" />
+  1408→                        <span className="text-[10px] text-blue-500 font-semibold">ЛИМИТНЫЙ ОРДЕР</span>
+  1409→                        <span className="text-[10px] text-muted-foreground">— ждите отката до уровня входа</span>
+  1410→                        {ts.entryReason && <span className="text-[10px] text-muted-foreground ml-auto">{ts.entryReason}</span>}
+  1411→                      </div>
+  1412→                    )}
+  1413→                    {ts.entryType === 'MARKET' && (
+  1414→                      <div className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/20">
+  1415→                        <Zap className="w-3 h-3 text-emerald-500" />
+  1416→                        <span className="text-[10px] text-emerald-500 font-semibold">РЫНОЧНЫЙ ОРДЕР</span>
+  1417→                        <span className="text-[10px] text-muted-foreground">— цена уже у уровня входа</span>
+  1418→                      </div>
+  1419→                    )}
+  1420→                    <div className="grid grid-cols-5 gap-2 text-xs">
+  1421→                      <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-2 text-center">
+  1422→                        <div className="text-muted-foreground text-[9px] font-semibold">ВХОД {ts.entryType === 'LIMIT' ? '(ЛИМИТ)' : '(РЫНОК)'}</div>
+  1423→                        <div className="font-mono font-bold text-blue-500 text-sm">${formatPrice(ts.entry)}</div>
+  1424→                        {ts.entryType === 'LIMIT' && ts.currentPrice !== ts.entry && (
+  1425→                          <div className="text-[9px] text-blue-400">{pctChange(ts.currentPrice, ts.entry)} от текущей</div>
+  1426→                        )}
+  1427→                      </div>
+  1428→                      <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-2 text-center">
+  1429→                        <div className="text-muted-foreground text-[9px] font-semibold">СТОП-ЛОСС</div>
+  1430→                        <div className="font-mono font-bold text-red-500 text-sm">${formatPrice(ts.stopLoss)}</div>
+  1431→                        <div className="text-[9px] text-red-400">{pctChange(ts.entry, ts.stopLoss)}</div>
+  1432→                      </div>
+  1433→                      <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2 text-center">
+  1434→                        <div className="text-muted-foreground text-[9px] font-semibold">TP1 (30%)</div>
+  1435→                        <div className="font-mono font-bold text-emerald-500 text-sm">${formatPrice(ts.takeProfit1)}</div>
+  1436→                        <div className="text-[9px] text-emerald-400">{pctChange(ts.entry, ts.takeProfit1)}</div>
+  1437→                      </div>
+  1438→                      <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2 text-center">
+  1439→                        <div className="text-muted-foreground text-[9px] font-semibold">TP2 (50%)</div>
+  1440→                        <div className="font-mono font-bold text-emerald-600 text-sm">${formatPrice(ts.takeProfit2)}</div>
+  1441→                        <div className="text-[9px] text-emerald-500">{pctChange(ts.entry, ts.takeProfit2)}</div>
+  1442→                      </div>
+  1443→                      <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2 text-center">
+  1444→                        <div className="text-muted-foreground text-[9px] font-semibold">TP3 (20%)</div>
+  1445→                        <div className="font-mono font-bold text-emerald-700 text-sm">${formatPrice(ts.takeProfit3)}</div>
+  1446→                        <div className="text-[9px] text-emerald-600">{pctChange(ts.entry, ts.takeProfit3)}</div>
+  1447→                      </div>
+  1448→                    </div>
+  1449→                    <div className="flex items-center gap-4 mt-2 text-xs flex-wrap">
+  1450→                      <span><Target className="w-3 h-3 text-muted-foreground inline mr-1" />R:R: <span className={`font-mono font-bold ${ts.riskReward >= 2 ? 'text-emerald-500' : 'text-yellow-500'}`}>{ts.riskReward.toFixed(2)}</span></span>
+  1451→                      <span><Timer className="w-3 h-3 text-muted-foreground inline mr-1" />Удержание: <span className="font-semibold">{ts.holdDuration}</span></span>
+  1452→                      <span><Shield className="w-3 h-3 text-muted-foreground inline mr-1" />Подд: <span className="text-emerald-500 font-mono">${formatPrice(ts.support)}</span></span>
+  1453→                      <span><Shield className="w-3 h-3 text-muted-foreground inline mr-1" />Сопр: <span className="text-red-500 font-mono">${formatPrice(ts.resistance)}</span></span>
+  1454→                      {ts.volumeSignal && <span><Volume2 className="w-3 h-3 text-muted-foreground inline mr-1" />{ts.volumeSignal}</span>}
+  1455→                    </div>
+  1456→                  </div>
+  1457→
+  1458→                  {/* Bottom: Step-by-step trade plan */}
+  1459→                  <div className="px-4 py-2.5 border-t border-border/50 bg-muted/20">
+  1460→                    <div className="flex items-start gap-4">
+  1461→                      <div className="flex-1 min-w-0">
+  1462→                        <div className="text-[10px] font-bold text-muted-foreground mb-1.5 uppercase tracking-wider">Пошаговый план сделки:</div>
+  1463→                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-0.5">
+  1464→                          {getTradeSteps().map((step, i) => (
+  1465→                            <div key={i} className="text-[11px] flex items-start gap-1.5">
+  1466→                              <CheckCircle2 className={`w-3 h-3 mt-0.5 flex-shrink-0 ${i === 0 ? (ts.direction === 'LONG' ? 'text-emerald-500' : 'text-red-500') : i === 1 ? 'text-red-500' : 'text-blue-500'}`} />
+  1467→                              <span>{step.replace(/^\d+\.\s/, '')}</span>
+  1468→                            </div>
+  1469→                          ))}
+  1470→                        </div>
+  1471→                      </div>
+  1472→                      <div className="min-w-[160px] max-w-[200px] space-y-1.5">
+  1473→                        {ts.reasons.length > 0 && <div><div className="text-[9px] text-emerald-500 font-semibold mb-0.5">Причины входа:</div>{ts.reasons.slice(0, 3).map((r, i) => <div key={i} className="flex items-start gap-1 text-[10px]"><CheckCircle2 className="w-2.5 h-2.5 text-emerald-500 mt-0.5 flex-shrink-0" />{r}</div>)}</div>}
+  1474→                        {ts.warnings.length > 0 && <div><div className="text-[9px] text-yellow-500 font-semibold mb-0.5">Риски:</div>{ts.warnings.slice(0, 2).map((w, i) => <div key={i} className="flex items-start gap-1 text-[10px]"><AlertCircle className="w-2.5 h-2.5 text-yellow-500 mt-0.5 flex-shrink-0" />{w}</div>)}</div>}
+  1475→                      </div>
+  1476→                    </div>
+  1477→                  </div>
+  1478→                </CardContent>
+  1479→              </Card>
+  1480→            )}
+  1481→
+  1482→            {ts && ts.direction === 'FLAT' && (
+  1483→              <Card className="border-2 border-yellow-500/30 bg-yellow-500/5">
+  1484→                <CardContent className="p-4">
+  1485→                  <div className="flex items-center gap-3">
+  1486→                    <Pause className="w-10 h-10 text-yellow-500" />
+  1487→                    <div>
+  1488→                      <div className="text-xl font-bold text-yellow-500">НЕТ СИГНАЛА — ЖДИТЕ</div>
+  1489→                      <div className="text-xs text-muted-foreground mt-0.5">Рынок в боковике. Дождитесь сигнала LONG или SHORT для входа.</div>
+  1490→                      {ts.reasons[0] && <div className="text-xs text-muted-foreground mt-1">{ts.reasons[0]}</div>}
+  1491→                    </div>
+  1492→                  </div>
+  1493→                </CardContent>
+  1494→              </Card>
+  1495→            )}
+  1496→
+  1497→            {/* Coin Info + MTF */}
+  1498→            <div className="grid grid-cols-1 md:grid-cols-[1fr_280px] gap-3">
+  1499→              <Card><CardContent className="p-3"><div className="flex flex-wrap items-center gap-3">
+  1500→                <div className="flex items-center gap-2"><div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center overflow-hidden">{selectedCoinData?.image ? <img src={selectedCoinData.image} alt="" className="w-7 h-7" /> : <span className="text-sm font-bold">{(selectedCoinData?.symbol||'??').slice(0,2)}</span>}</div><div><h2 className="text-base font-bold">{selectedCoinData?.name||selectedCoin}</h2><span className="text-[10px] text-muted-foreground uppercase">{selectedCoinData?.symbol||selectedCoin}/USDT</span></div></div>
+  1501→                <div className="flex items-baseline gap-2"><span className="text-xl font-bold font-mono">${formatPrice(displayPrice)}</span>{selectedCoinData && <span className={`text-xs font-semibold flex items-center gap-0.5 ${priceChange24h>=0?'text-emerald-500':'text-red-500'}`}>{priceChange24h>=0?<ChevronUp className="w-3 h-3"/>:<ChevronDown className="w-3 h-3"/>}{Math.abs(priceChange24h).toFixed(2)}%</span>}</div>
+  1502→                <div className="flex gap-3 ml-auto text-[10px]">{selectedCoinData?.market_cap ? <div className="text-center"><div className="text-muted-foreground">Кап.</div><div className="font-mono font-semibold">{formatNumber(selectedCoinData.market_cap)}</div></div> : null}{ts && ts.atr > 0 && <div className="text-center"><div className="text-muted-foreground">ATR</div><div className="font-mono text-blue-500">${formatPrice(ts.atr)}</div></div>}{ts && <div className="text-center"><div className="text-muted-foreground">Подд</div><div className="font-mono text-emerald-500">${formatPrice(ts.support)}</div></div>}{ts && <div className="text-center"><div className="text-muted-foreground">Сопр</div><div className="font-mono text-red-500">${formatPrice(ts.resistance)}</div></div>}</div>
+  1503→              </div></CardContent></Card>
+  1504→
+  1505→              {ts && (
+  1506→                <Card><CardHeader className="px-3 py-2"><CardTitle className="text-xs flex items-center gap-1.5"><Cpu className="w-3.5 h-3.5 text-blue-500" />Мульти-ТФ<Badge variant="outline" className="text-[8px] ml-1">{ts.multiTimeframe.alignment}%</Badge></CardTitle></CardHeader>
+  1507→                <CardContent className="px-3 pb-3 pt-0">
+  1508→                  <div className="grid grid-cols-4 gap-1">{(['m5', 'm15', 'h1', 'h4'] as const).map(tf => { const v = ts.multiTimeframe[tf]; return (
+  1509→                    <div key={tf} className={`rounded-md border p-1.5 text-center ${v ? (v.direction === 'BULLISH' ? 'border-emerald-500/30 bg-emerald-500/5' : v.direction === 'BEARISH' ? 'border-red-500/30 bg-red-500/5' : 'border-border') : 'border-border opacity-40'}`}>
+  1510→                      <div className="text-[9px] font-bold text-muted-foreground">{tf.toUpperCase()}</div>
+  1511→                      {v ? <><div className={`text-xs font-bold ${v.direction === 'BULLISH' ? 'text-emerald-500' : v.direction === 'BEARISH' ? 'text-red-500' : 'text-yellow-500'}`}>{v.direction === 'BULLISH' ? '▲' : v.direction === 'BEARISH' ? '▼' : '→'}</div><div className="text-[8px] text-muted-foreground">{Math.abs(v.score)}</div></> : <div className="text-[9px] text-muted-foreground">—</div>}
+  1512→                    </div>); })}</div>
+  1513→                  <div className="mt-1.5 text-center"><Badge className={`text-[9px] ${ts.multiTimeframe.consensus.includes('LONG') ? 'bg-emerald-500' : ts.multiTimeframe.consensus.includes('SHORT') ? 'bg-red-500' : 'bg-yellow-500'} text-white`}>
+  1514→                    {ts.multiTimeframe.consensus === 'STRONG_LONG' ? '⬆ СИЛЬНЫЙ ЛОНГ' : ts.multiTimeframe.consensus === 'LONG' ? '↑ ЛОНГ' : ts.multiTimeframe.consensus === 'STRONG_SHORT' ? '⬇ СИЛЬНЫЙ ШОРТ' : ts.multiTimeframe.consensus === 'SHORT' ? '↓ ШОРТ' : '→ НЕЙТРАЛЬНО'}
+  1515→                  </Badge></div>
+  1516→                </CardContent></Card>
+  1517→              )}
+  1518→            </div>
+  1519→
+  1520→            {/* Chart Controls */}
+  1521→            <div className="flex items-center gap-2 flex-wrap">
+  1522→              <div className="flex items-center gap-0.5 bg-card rounded-lg border border-border p-0.5">
+  1523→                {[{v:'1m',l:'1М'},{v:'5m',l:'5М'},{v:'15m',l:'15М'},{v:'1h',l:'1Ч'},{v:'4h',l:'4Ч'}].map(tf => (
+  1524→                  <button key={tf.v} onClick={() => setInterval_(tf.v)} className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${interval === tf.v ? 'bg-primary text-primary-foreground' : 'hover:bg-accent text-muted-foreground'}`}>{tf.l}</button>
+  1525→                ))}
+  1526→              </div>
+  1527→              <button onClick={() => setShowIndicators(!showIndicators)} className={`px-2 py-1 text-[11px] rounded-md border transition-colors ${showIndicators ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:bg-accent'}`}><LineChart className="w-3 h-3 inline mr-1"/>Индикаторы</button>
+  1528→              <button onClick={() => { if (positionTool.enabled) { setPositionTool(p => ({ ...p, enabled: false })); } else { const entry = displayPrice || 0; const isLong = ts?.direction !== 'SHORT'; setPositionTool({ enabled: true, direction: isLong ? 'LONG' : 'SHORT', entryPrice: entry, targetPrice: ts?.takeProfit2 || entry * (isLong ? 1.05 : 0.95), stopLoss: ts?.stopLoss || entry * (isLong ? 0.97 : 1.03), amount: 100, leverage: 1 }); } }} className={`px-2 py-1 text-[11px] rounded-md border transition-colors ${positionTool.enabled ? 'bg-blue-500 text-white border-blue-500' : 'border-border hover:bg-accent'}`}><Crosshair className="w-3 h-3 inline mr-1"/>Позиция</button>
+  1529→              <button onClick={() => fetchAdvisor()} className={`px-2 py-1 text-[11px] rounded-md border transition-colors ${advisorVisible ? 'bg-purple-500 text-white border-purple-500' : 'border-border hover:bg-accent'}`}><Brain className="w-3 h-3 inline mr-1"/>AI Советчик</button>
+  1530→            </div>
+  1531→
+  1532→            {/* Chart */}
+  1533→            <Card><CardContent className="p-2 sm:p-3">
+  1534→              {chartLoading ? <div className="h-[480px] flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-emerald-500" /><span className="ml-3 text-sm text-muted-foreground">Загрузка...</span></div>
+  1535→              : chartData.length > 0 ? <CandlestickChartComponent data={chartData} overlayIndicators={showIndicators} positionTool={positionTool.enabled ? positionTool : null} tradeSignal={ts} />
+  1536→              : <div className="h-[480px] flex items-center justify-center text-muted-foreground"><div className="text-center"><BarChart3 className="w-10 h-10 mx-auto mb-2 opacity-30" /><p className="text-sm">Выберите монету</p></div></div>}
+  1537→            </CardContent></Card>
+  1538→
+  1539→            {/* Position Tool Panel */}
+  1540→            {positionTool.enabled && (
+  1541→              <Card className={`border-2 ${positionTool.direction === 'LONG' ? 'border-emerald-500/40' : 'border-red-500/40'}`}>
+  1542→                <CardHeader className="px-3 py-2"><CardTitle className="text-xs flex items-center gap-1.5"><Crosshair className="w-3.5 h-3.5 text-blue-500" />Калькулятор позиции<Button variant="ghost" size="sm" className="ml-auto h-5 w-5 p-0" onClick={() => setPositionTool(p => ({ ...p, enabled: false }))}><X className="w-3 h-3" /></Button></CardTitle></CardHeader>
+  1543→                <CardContent className="px-3 pb-3 pt-0 space-y-3">
+  1544→                  <div className="flex gap-1"><button onClick={() => setPositionTool(p => ({ ...p, direction: 'LONG' }))} className={`flex-1 py-1.5 rounded-md text-xs font-bold transition-all ${positionTool.direction === 'LONG' ? 'bg-emerald-500 text-white' : 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/30'}`}>▲ LONG</button><button onClick={() => setPositionTool(p => ({ ...p, direction: 'SHORT' }))} className={`flex-1 py-1.5 rounded-md text-xs font-bold transition-all ${positionTool.direction === 'SHORT' ? 'bg-red-500 text-white' : 'bg-red-500/10 text-red-500 border border-red-500/30'}`}>▼ SHORT</button></div>
+  1545→                  <div className="grid grid-cols-3 gap-2">
+  1546→                    <div><label className="text-[9px] text-muted-foreground block mb-0.5">Вход</label><Input type="number" value={positionTool.entryPrice || ''} onChange={e => setPositionTool(p => ({ ...p, entryPrice: Number(e.target.value) || 0 }))} className="h-7 text-[11px] font-mono" step={displayPrice >= 1 ? 0.01 : 0.0000001} /></div>
+  1547→                    <div><label className="text-[9px] text-muted-foreground block mb-0.5">Цель</label><Input type="number" value={positionTool.targetPrice || ''} onChange={e => setPositionTool(p => ({ ...p, targetPrice: Number(e.target.value) || 0 }))} className="h-7 text-[11px] font-mono" step={displayPrice >= 1 ? 0.01 : 0.0000001} /></div>
+  1548→                    <div><label className="text-[9px] text-muted-foreground block mb-0.5">Стоп</label><Input type="number" value={positionTool.stopLoss || ''} onChange={e => setPositionTool(p => ({ ...p, stopLoss: Number(e.target.value) || 0 }))} className="h-7 text-[11px] font-mono" step={displayPrice >= 1 ? 0.01 : 0.0000001} /></div>
+  1549→                  </div>
+  1550→                  <div className="grid grid-cols-2 gap-2">
+  1551→                    <div><label className="text-[9px] text-muted-foreground block mb-0.5">Сумма: ${positionTool.amount}</label><Slider value={[positionTool.amount]} onValueChange={v => setPositionTool(p => ({ ...p, amount: v[0] }))} min={1} max={10000} step={1} /><div className="flex gap-1 mt-1">{[10, 50, 100, 500, 1000].map(a => <button key={a} onClick={() => setPositionTool(p => ({ ...p, amount: a }))} className={`px-1.5 py-0.5 text-[8px] rounded ${positionTool.amount === a ? 'bg-primary text-primary-foreground' : 'border border-border hover:bg-accent'}`}>${a}</button>)}</div></div>
+  1552→                    <div><label className="text-[9px] text-muted-foreground block mb-0.5">Плечо: {positionTool.leverage}x</label><Slider value={[positionTool.leverage]} onValueChange={v => setPositionTool(p => ({ ...p, leverage: v[0] }))} min={1} max={10} step={1} /><div className="flex gap-1 mt-1">{[1, 2, 3, 5, 10].map(l => <button key={l} onClick={() => setPositionTool(p => ({ ...p, leverage: l }))} className={`px-1.5 py-0.5 text-[8px] rounded ${positionTool.leverage === l ? 'bg-primary text-primary-foreground' : 'border border-border hover:bg-accent'}`}>{l}x</button>)}</div></div>
+  1553→                  </div>
+  1554→                  {positionTool.entryPrice > 0 && (() => { const tp = (positionTool.direction === 'LONG' ? ((positionTool.targetPrice - positionTool.entryPrice) / positionTool.entryPrice) : ((positionTool.entryPrice - positionTool.targetPrice) / positionTool.entryPrice)) * positionTool.amount * positionTool.leverage; const sp = (positionTool.direction === 'LONG' ? ((positionTool.stopLoss - positionTool.entryPrice) / positionTool.entryPrice) : ((positionTool.entryPrice - positionTool.stopLoss) / positionTool.entryPrice)) * positionTool.amount * positionTool.leverage; const r = sp !== 0 ? Math.abs(tp / sp) : 0; const liq = positionTool.leverage > 1 ? (positionTool.direction === 'LONG' ? positionTool.entryPrice * (1 - 1 / positionTool.leverage) : positionTool.entryPrice * (1 + 1 / positionTool.leverage)) : 0; return (
+  1555→                    <div className="rounded-lg border border-border p-2 space-y-1.5">
+  1556→                      <div className="flex justify-between items-center text-xs"><span className="text-muted-foreground">Профит:</span><span className={`font-mono font-bold ${tp >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{tp >= 0 ? '+' : ''}{formatPrice(tp)}$</span></div>
+  1557→                      <div className="flex justify-between items-center text-xs"><span className="text-muted-foreground">Стоп:</span><span className="font-mono font-bold text-red-500">{formatPrice(sp)}$</span></div>
+  1558→                      <Separator />
+  1559→                      <div className="flex justify-between items-center text-xs"><span className="text-muted-foreground">R:R:</span><span className={`font-mono font-bold ${r >= 2 ? 'text-emerald-500' : 'text-yellow-500'}`}>1 : {r.toFixed(2)}</span></div>
+  1560→                      {positionTool.leverage > 1 && <div className="flex justify-between items-center text-xs"><span className="text-muted-foreground">Ликвидация:</span><span className="font-mono text-red-400">${formatPrice(liq)}</span></div>}
+  1561→                      <div className="flex justify-between items-center text-xs"><span className="text-muted-foreground">Итого:</span><span className={`font-mono font-bold ${tp >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>${formatPrice(positionTool.amount + tp)}</span></div>
+  1562→                    </div>); })()}
+  1563→                </CardContent>
+  1564→              </Card>
+  1565→            )}
+  1566→
+  1567→            {/* RSI & MACD */}
+  1568→            {chartData.length > 0 && (
+  1569→              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+  1570→                <Card><CardHeader className="px-3 py-1.5"><CardTitle className="text-xs flex items-center gap-1.5"><Activity className="w-3.5 h-3.5 text-purple-500" />RSI (14){(() => { const lr = chartData.filter(d => d.rsi != null).slice(-1)[0]?.rsi; return lr != null ? <span className={`ml-auto font-mono text-sm ${lr < 30 ? 'text-emerald-500' : lr > 70 ? 'text-red-500' : 'text-muted-foreground'}`}>{lr.toFixed(1)}</span> : null; })()}</CardTitle></CardHeader><CardContent className="p-2 pt-0"><MiniLineChart data={chartData.map(d => d.rsi).filter(v => v != null) as number[]} color="#8b5cf6" yMin={0} yMax={100} refLines={[30, 70]} /></CardContent></Card>
+  1571→                <Card><CardHeader className="px-3 py-1.5"><CardTitle className="text-xs flex items-center gap-1.5"><BarChart3 className="w-3.5 h-3.5 text-orange-500" />MACD</CardTitle></CardHeader><CardContent className="p-2 pt-0"><MiniMACDChart data={chartData} /></CardContent></Card>
+  1572→              </div>
+  1573→            )}
+  1574→
+  1575→            {/* AI Advisor Panel — Compact */}
+  1576→            {advisorVisible && (
+  1577→              <Card className="border border-purple-500/30">
+  1578→                <CardHeader className="px-3 py-2 flex flex-row items-center gap-2 space-y-0">
+  1579→                  <Brain className="w-4 h-4 text-purple-500" />
+  1580→                  <span className="text-xs font-semibold">AI Советчик</span>
+  1581→                  <Badge variant="outline" className="text-[8px] text-purple-500 border-purple-500/30">
+  1582→                    {(selectedCoinData?.symbol || selectedCoin).toUpperCase()}
+  1583→                  </Badge>
+  1584→                  {ts && ts.direction !== 'FLAT' && (
+  1585→                    <Badge className={`text-[8px] ${ts.direction === 'LONG' ? 'bg-emerald-500' : 'bg-red-500'} text-white`}>
+  1586→                      {ts.direction === 'LONG' ? '▲' : '▼'} {ts.confidence}%
+  1587→                    </Badge>
+  1588→                  )}
+  1589→                  <div className="ml-auto flex items-center gap-1">
+  1590→                    {!advisorLoading && advisorAnalysis && (
+  1591→                      <Button variant="ghost" size="sm" onClick={() => fetchAdvisor()} className="h-5 w-5 p-0">
+  1592→                        <RefreshCw className="w-3 h-3 text-muted-foreground" />
+  1593→                      </Button>
+  1594→                    )}
+  1595→                    <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => { setAdvisorVisible(false); setAdvisorAnalysis(null); }}>
+  1596→                      <X className="w-3 h-3" />
+  1597→                    </Button>
+  1598→                  </div>
+  1599→                </CardHeader>
+  1600→                <CardContent className="px-3 pb-3 pt-0">
+  1601→                  {advisorLoading ? (
+  1602→                    <div className="flex items-center gap-2 py-4 justify-center">
+  1603→                      <Loader2 className="w-4 h-4 animate-spin text-purple-500" />
+  1604→                      <span className="text-xs text-muted-foreground">AI анализирует...</span>
+  1605→                    </div>
+  1606→                  ) : advisorAnalysis ? (
+  1607→                    <div className="space-y-1.5">
+  1608→                      {advisorAnalysis.split('\n').map((line, i) => {
+  1609→                        if (line.trim() === '') return null;
+  1610→                        // Bold header line like **Суть:**
+  1611→                        if (line.startsWith('**ИТОГ') || line.startsWith('**Итог')) {
+  1612→                          const clean = line.replace(/\*\*/g, '');
+  1613→                          return (
+  1614→                            <div key={i} className="mt-2 rounded-md bg-purple-500/10 border border-purple-500/30 px-3 py-2">
+  1615→                              <span className="text-xs font-bold text-purple-500">{clean}</span>
+  1616→                            </div>
+  1617→                          );
+  1618→                        }
+  1619→                        if (line.startsWith('**') && line.endsWith('**')) {
+  1620→                          return <div key={i} className="text-xs font-bold text-foreground mt-1">{line.replace(/\*\*/g, '')}</div>;
+  1621→                        }
+  1622→                        if (line.startsWith('**')) {
+  1623→                          const parts = line.split('**');
+  1624→                          return <div key={i} className="text-xs text-muted-foreground">
+  1625→                            {parts.map((part, j) => j % 2 === 1 ? <strong key={j} className="text-foreground">{part}</strong> : part)}
+  1626→                          </div>;
+  1627→                        }
+  1628→                        return <div key={i} className="text-xs text-muted-foreground">{line}</div>;
+  1629→                      })}
+  1630→                    </div>
+  1631→                  ) : (
+  1632→                    <div className="text-center py-3 text-muted-foreground text-[10px]">
+  1633→                      Нажмите «AI Советчик» для краткого анализа
+  1634→                    </div>
+  1635→                  )}
+  1636→                </CardContent>
+  1637→              </Card>
+  1638→            )}
+  1639→
+  1640→            {/* Indicators */}
+  1641→            {signal && signal.indicators.length > 0 && (
+  1642→              <Card><CardHeader className="px-3 py-2"><CardTitle className="text-xs flex items-center gap-1.5"><Shield className="w-3.5 h-3.5 text-blue-500" />Индикаторы</CardTitle></CardHeader>
+  1643→              <CardContent className="px-3 pb-3 pt-0"><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">{signal.indicators.map((ind, i) => (
+  1644→                <div key={i} className={`rounded-lg border p-2.5 ${ind.signal==='BUY'?'border-emerald-500/30 bg-emerald-500/5':ind.signal==='SELL'?'border-red-500/30 bg-red-500/5':'border-border'}`}>
+  1645→                  <div className="flex items-center justify-between mb-1"><span className="text-xs font-semibold">{ind.name}</span><Badge variant="outline" className={`text-[9px] ${ind.signal==='BUY'?'text-emerald-500 border-emerald-500/30':ind.signal==='SELL'?'text-red-500 border-red-500/30':'text-yellow-500 border-yellow-500/30'}`}>{ind.signal==='BUY'?'ПОКУПКА':ind.signal==='SELL'?'ПРОДАЖА':'НЕЙТР.'}</Badge></div>
+  1646→                  <div className="text-[10px] font-mono text-muted-foreground">{ind.value}</div><div className="text-[10px] text-muted-foreground mt-0.5">{ind.description}</div>
+  1647→                </div>))}</div></CardContent></Card>
+  1648→            )}
+  1649→
+  1650→            {/* Top Movers */}
+  1651→            {coins.length > 0 && (
+  1652→              <Card><CardHeader className="px-3 py-2"><CardTitle className="text-xs flex items-center gap-1.5"><Eye className="w-3.5 h-3.5 text-cyan-500" />Топ движения 24ч</CardTitle></CardHeader>
+  1653→              <CardContent className="px-3 pb-3 pt-0"><div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-1.5">{coins.filter(c=>c.price_change_percentage_24h!=null).sort((a,b)=>Math.abs(b.price_change_percentage_24h)-Math.abs(a.price_change_percentage_24h)).slice(0,16).map(coin=>(
+  1654→                <button key={coin.id} onClick={()=>setSelectedCoin(coin.id)} className={`rounded-lg border p-2 text-left transition-all hover:shadow-sm ${selectedCoin===coin.id?'border-primary ring-1 ring-primary':'border-border'}`}>
+  1655→                  <div className="flex items-center gap-1 mb-0.5"><div className="w-4 h-4 rounded-full bg-muted flex items-center justify-center overflow-hidden">{coin.image?<img src={coin.image} alt="" className="w-3 h-3"/>:<span className="text-[6px] font-bold">{coin.symbol.slice(0,2)}</span>}</div><span className="text-[10px] font-semibold truncate">{coin.symbol}</span></div>
+  1656→                  <div className="text-[10px] font-mono">${formatPrice(coin.current_price)}</div>
+  1657→                  <div className={`text-[10px] font-semibold flex items-center gap-0.5 ${(coin.price_change_percentage_24h||0)>=0?'text-emerald-500':'text-red-500'}`}>{(coin.price_change_percentage_24h||0)>=0?<TrendingUp className="w-2.5 h-2.5"/>:<TrendingDown className="w-2.5 h-2.5"/>}{Math.abs(coin.price_change_percentage_24h||0).toFixed(2)}%</div>
+  1658→                </button>))}</div></CardContent></Card>
+  1659→            )}
+  1660→
+  1661→            <div className="text-center text-[9px] text-muted-foreground/50 py-1"><AlertTriangle className="w-2.5 h-2.5 inline mr-0.5"/>Не финансовая рекомендация. Торговля связана с риском.</div>
+  1662→          </div>
+  1663→        </div>
+  1664→      </main>
+  1665→
+  1666→      {/* ====== TRADER JOURNAL MODAL ====== */}
+  1667→      {showReputationPanel && reputation && (
+  1668→        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onClick={() => setShowReputationPanel(false)}>
+  1669→          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+  1670→          <div className="relative bg-card border-2 border-purple-500/30 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+  1671→            {/* Header — flex-shrink-0 to prevent compression */}
+  1672→            <div className="flex-shrink-0 px-5 py-4 border-b border-border bg-gradient-to-r from-purple-500/10 to-transparent">
+  1673→              <div className="flex items-center justify-between">
+  1674→                <div className="flex items-center gap-3">
+  1675→                  <div className="w-12 h-12 rounded-xl bg-purple-500/20 flex items-center justify-center">
+  1676→                    <span className="text-2xl">{reputation.levelEmoji}</span>
+  1677→                  </div>
+  1678→                  <div>
+  1679→                    <h2 className="text-base font-bold flex items-center gap-2">
+  1680→                      Журнал трейдера
+  1681→                      <Badge className="bg-purple-500 text-white text-[9px]">{reputation.level}</Badge>
+  1682→                    </h2>
+  1683→                    <div className="flex items-center gap-3 mt-0.5 text-[10px]">
+  1684→                      <span className="text-muted-foreground">Капитал:</span>
+  1685→                      <span className="font-mono font-bold text-foreground">${(reputation.freeBalance + (reputation.lockedInPositions || 0)).toFixed(2)}</span>
+  1686→                      <span className={`font-mono font-bold ${reputation.totalPnl >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+  1687→                        {reputation.totalPnl >= 0 ? '+' : ''}{reputation.totalPnl.toFixed(2)} USDT
+  1688→                      </span>
+  1689→                      <span className={`text-[9px] ${reputation.totalPnl >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+  1690→                        ({reputation.totalPnl >= 0 ? '+' : ''}{(((reputation.freeBalance + (reputation.lockedInPositions || 0)) / reputation.initialDeposit - 1) * 100).toFixed(1)}%)
+  1691→                      </span>
+  1692→                    </div>
+  1693→                  </div>
+  1694→                </div>
+  1695→                <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => setShowReputationPanel(false)}>
+  1696→                  <X className="w-4 h-4" />
+  1697→                </Button>
+  1698→              </div>
+  1699→
+  1700→              {/* Stats row */}
+  1701→              <div className="grid grid-cols-4 gap-2 mt-3">
+  1702→                <div className="rounded-lg border border-border bg-card p-2 text-center">
+  1703→                  <div className="text-[8px] text-muted-foreground uppercase">Капитал</div>
+  1704→                  <div className={`text-xs font-mono font-bold ${(reputation.freeBalance + (reputation.lockedInPositions || 0)) >= reputation.initialDeposit ? 'text-emerald-500' : 'text-red-500'}`}>
+  1705→                    ${(reputation.freeBalance + (reputation.lockedInPositions || 0)).toFixed(2)}
+  1706→                  </div>
+  1707→                </div>
+  1708→                <div className={`rounded-lg border p-2 text-center ${reputation.freeBalance > 0 ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+  1709→                  <div className={`text-[8px] uppercase ${reputation.freeBalance > 0 ? 'text-emerald-500' : 'text-red-500'}`}>Свободно</div>
+  1710→                  <div className={`text-xs font-mono font-bold ${reputation.freeBalance > 0 ? 'text-emerald-500' : 'text-red-500'}`}>${(reputation.freeBalance || 0).toFixed(2)}</div>
+  1711→                </div>
+  1712→                <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-2 text-center">
+  1713→                  <div className="text-[8px] text-blue-500 uppercase">В сделках</div>
+  1714→                  <div className="text-xs font-mono font-bold text-blue-500">${(reputation.lockedInPositions || 0).toFixed(2)}</div>
+  1715→                </div>
+  1716→                <div className="rounded-lg border border-border bg-card p-2 text-center">
+  1717→                  <div className="text-[8px] text-muted-foreground uppercase">Депозит</div>
+  1718→                  <div className="text-xs font-mono font-bold">${reputation.initialDeposit}</div>
+  1719→                </div>
+  1720→              </div>
+  1721→
+  1722→              {/* Second stats row */}
+  1723→              <div className="grid grid-cols-4 gap-2 mt-2">
+  1724→                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2 text-center">
+  1725→                  <div className="text-[8px] text-emerald-500 uppercase">Прибыль</div>
+  1726→                  <div className="text-xs font-mono font-bold text-emerald-500">{reputation.wins}</div>
+  1727→                </div>
+  1728→                <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-2 text-center">
+  1729→                  <div className="text-[8px] text-red-500 uppercase">Убыток</div>
+  1730→                  <div className="text-xs font-mono font-bold text-red-500">{reputation.losses}</div>
+  1731→                </div>
+  1732→                <div className="rounded-lg border border-border bg-card p-2 text-center">
+  1733→                  <div className="text-[8px] text-muted-foreground uppercase">Винрейт</div>
+  1734→                  <div className={`text-xs font-mono font-bold ${reputation.winRate >= 50 ? 'text-emerald-500' : 'text-red-500'}`}>{reputation.winRate}%</div>
+  1735→                </div>
+  1736→                <div className="rounded-lg border border-border bg-card p-2 text-center">
+  1737→                  <div className="text-[8px] text-muted-foreground uppercase">Очки</div>
+  1738→                  <div className={`text-xs font-mono font-bold ${reputation.score >= 0 ? 'text-purple-500' : 'text-red-500'}`}>{reputation.score}</div>
+  1739→                </div>
+  1740→              </div>
+  1741→
+  1742→              {/* Debt / Credit row */}
+  1743→              {(reputation.totalDebt > 0 || reputation.totalRepaid > 0) && (
+  1744→                <div className="flex items-center gap-2 mt-2">
+  1745→                  {reputation.totalDebt > 0 && (
+  1746→                    <div className="flex-1 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 text-center">
+  1747→                      <div className="text-[8px] text-amber-500 uppercase">Долг</div>
+  1748→                      <div className="text-xs font-mono font-bold text-amber-500">${reputation.totalDebt.toFixed(2)}</div>
+  1749→                    </div>
+  1750→                  )}
+  1751→                  {reputation.totalRepaid > 0 && (
+  1752→                    <div className="flex-1 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2 text-center">
+  1753→                      <div className="text-[8px] text-emerald-500 uppercase">Возвращено</div>
+  1754→                      <div className="text-xs font-mono font-bold text-emerald-500">${reputation.totalRepaid.toFixed(2)}</div>
+  1755→                    </div>
+  1756→                  )}
+  1757→                  <div className="flex-1 rounded-lg border border-border bg-card p-2 text-center">
+  1758→                    <div className="text-[8px] text-muted-foreground uppercase">Собственные</div>
+  1759→                    <div className={`text-xs font-mono font-bold ${((reputation.freeBalance + (reputation.lockedInPositions || 0)) - reputation.totalDebt) >= reputation.initialDeposit ? 'text-emerald-500' : 'text-red-500'}`}>
+  1760→                      ${((reputation.freeBalance + (reputation.lockedInPositions || 0)) - reputation.totalDebt).toFixed(2)}
+  1761→                    </div>
+  1762→                  </div>
+  1763→                </div>
+  1764→              )}
+  1765→
+  1766→              {/* Deposit funds + Scan button */}
+  1767→              <div className="flex items-center gap-2 mt-2">
+  1768→                <div className="flex-1 flex items-center gap-1">
+  1769→                  <Input
+  1770→                    type="number"
+  1771→                    placeholder="Сумма USDT"
+  1772→                    value={depositAmount}
+  1773→                    onChange={e => setDepositAmount(e.target.value)}
+  1774→                    className="h-7 text-[11px] font-mono"
+  1775→                    min={1}
+  1776→                    step={1}
+  1777→                  />
+  1778→                  <Button
+  1779→                    size="sm"
+  1780→                    onClick={depositFunds}
+  1781→                    disabled={depositLoading || !depositAmount}
+  1782→                    className="h-7 text-[10px] gap-1 bg-amber-500 hover:bg-amber-600 text-white"
+  1783→                  >
+  1784→                    <DollarSign className="w-3 h-3" />
+  1785→                    {depositLoading ? '...' : 'Дать в кредит'}
+  1786→                  </Button>
+  1787→                </div>
+  1788→                <Button
+  1789→                  size="sm"
+  1790→                  onClick={scanAndTrade}
+  1791→                  disabled={scanLoading}
+  1792→                  className="h-7 text-[10px] gap-1 bg-purple-500 hover:bg-purple-600 text-white"
+  1793→                >
+  1794→                  <Cpu className="w-3 h-3" />
+  1795→                  {scanLoading ? 'Скан...' : 'Скан монет'}
+  1796→                </Button>
+  1797→              </div>
+  1798→              {depositAmount && parseFloat(depositAmount) > 0 && (
+  1799→                <div className="text-[9px] text-amber-500/80 mt-1">
+  1800→                  Средства будут добавлены как кредит — трейдер должен будет их вернуть из прибыли
+  1801→                </div>
+  1802→              )}
+  1803→            </div>
+  1804→
+  1805→            {/* Content — scrollable, takes remaining space */}
+  1806→            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+  1807→              {/* Deposit chart */}
+  1808→              {reputation.depositHistory && reputation.depositHistory.length > 1 && (
+  1809→                <div>
+  1810→                  <div className="text-[10px] font-bold text-muted-foreground mb-2 uppercase tracking-wider">Динамика депозита</div>
+  1811→                  <DepositChart data={reputation.depositHistory} initialDeposit={reputation.initialDeposit} totalDebt={reputation.totalDebt} />
+  1812→                </div>
+  1813→              )}
+  1814→
+  1815→              {/* Adaptive learning — Current rules */}
+  1816→              {reputation.adaptive && (reputation.adaptive.lessons.length > 0 || reputation.adaptive.avoidCoins.length > 0) && (
+  1817→                <div>
+  1818→                  <div className="text-[10px] font-bold text-amber-500 mb-2 uppercase tracking-wider flex items-center gap-1.5">
+  1819→                    <Brain className="w-3 h-3" />
+  1820→                    Обучение на ошибках
+  1821→                    <span className="text-[8px] text-muted-foreground font-normal">({reputation.adaptive.lessons.length} уроков)</span>
+  1822→                  </div>
+  1823→                  {/* Active adaptive rules */}
+  1824→                  <div className="grid grid-cols-3 gap-2 mb-2">
+  1825→                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 text-center">
+  1826→                      <div className="text-[8px] text-amber-500 uppercase">Мин. SL</div>
+  1827→                      <div className="text-xs font-mono font-bold text-amber-500">{reputation.adaptive.minSlDistancePct.toFixed(1)}%</div>
+  1828→                    </div>
+  1829→                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 text-center">
+  1830→                      <div className="text-[8px] text-amber-500 uppercase">Мин. увер.</div>
+  1831→                      <div className="text-xs font-mono font-bold text-amber-500">{reputation.adaptive.minConfidence}%</div>
+  1832→                    </div>
+  1833→                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 text-center">
+  1834→                      <div className="text-[8px] text-amber-500 uppercase">Мин. R:R</div>
+  1835→                      <div className="text-xs font-mono font-bold text-amber-500">{reputation.adaptive.minRr.toFixed(1)}</div>
+  1836→                    </div>
+  1837→                  </div>
+  1838→                  {/* Avoided coins */}
+  1839→                  {reputation.adaptive.avoidCoins.length > 0 && (
+  1840→                    <div className="flex flex-wrap gap-1 mb-2">
+  1841→                      <span className="text-[9px] text-red-400">Избегать:</span>
+  1842→                      {reputation.adaptive.avoidCoins.map(c => (
+  1843→                        <span key={c} className="text-[8px] px-1.5 py-0.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-400">{c}</span>
+  1844→                      ))}
+  1845→                    </div>
+  1846→                  )}
+  1847→                  {/* Recent lessons */}
+  1848→                  <div className="space-y-1.5 max-h-40 overflow-y-auto">
+  1849→                    {reputation.adaptive.lessons.slice(-8).reverse().map((lesson, i) => (
+  1850→                      <div key={`${lesson.type}-${lesson.timestamp}-${i}`} className={`rounded-lg border p-2 text-[10px] ${
+  1851→                        lesson.severity === 'high' ? 'border-red-500/30 bg-red-500/5' :
+  1852→                        lesson.severity === 'medium' ? 'border-amber-500/30 bg-amber-500/5' :
+  1853→                        'border-zinc-500/20 bg-zinc-500/5'
+  1854→                      }`}>
+  1855→                        <div className="flex items-start gap-1.5">
+  1856→                          <span className={`mt-0.5 flex-shrink-0 ${
+  1857→                            lesson.severity === 'high' ? 'text-red-500' :
+  1858→                            lesson.severity === 'medium' ? 'text-amber-500' : 'text-zinc-400'
+  1859→                          }`}>
+  1860→                            {lesson.severity === 'high' ? '🔴' : lesson.severity === 'medium' ? '🟡' : '⚪'}
+  1861→                          </span>
+  1862→                          <div className="flex-1 min-w-0">
+  1863→                            <div className="text-foreground leading-tight">{lesson.description}</div>
+  1864→                            <div className="text-muted-foreground text-[8px] mt-0.5">
+  1865→                              {new Date(lesson.timestamp).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+  1866→                            </div>
+  1867→                          </div>
+  1868→                        </div>
+  1869→                      </div>
+  1870→                    ))}
+  1871→                  </div>
+  1872→                </div>
+  1873→              )}
+  1874→
+  1875→              {/* Trade filter + list */}
+  1876→              <div>
+  1877→                <div className="flex items-center justify-between mb-2">
+  1878→                  <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+  1879→                    Сделки ({reputation.trades.length})
+  1880→                  </div>
+  1881→                </div>
+  1882→                <TradeFilter trades={reputation.trades} onTradeClick={(trade) => { setSelectedTrade(trade); }} onDeleteTrade={deleteTrade} />
+  1883→              </div>
+  1884→            </div>
+  1885→          </div>
+  1886→        </div>
+  1887→      )}
+  1888→
+  1889→      {/* ====== TRADER THINKING PANEL ====== */}
+  1890→      {showThinkingPanel && (
+  1891→        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onClick={() => setShowThinkingPanel(false)}>
+  1892→          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+  1893→          <div className="relative bg-card border-2 border-amber-500/30 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+  1894→            {/* Header */}
+  1895→            <div className="flex-shrink-0 px-5 py-4 border-b border-border bg-gradient-to-r from-amber-500/10 to-transparent">
+  1896→              <div className="flex items-center justify-between">
+  1897→                <div className="flex items-center gap-3">
+  1898→                  <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center">
+  1899→                    <Brain className="w-6 h-6 text-amber-500" />
+  1900→                  </div>
+  1901→                  <div>
+  1902→                    <h2 className="text-base font-bold flex items-center gap-2">
+  1903→                      Мышление трейдера
+  1904→                      <Badge className="bg-amber-500 text-white text-[9px]">LIVE</Badge>
+  1905→                    </h2>
+  1906→                    <div className="flex items-center gap-3 mt-0.5 text-[10px]">
+  1907→                      <span className="text-amber-500 font-semibold">{traderThinking?.currentMood || 'Анализ рынка'}</span>
+  1908→                      <span className="text-muted-foreground">|</span>
+  1909→                      <span className="text-muted-foreground">Рынок: <span className={traderThinking?.marketView === 'Бычий' ? 'text-emerald-500' : traderThinking?.marketView === 'Медвежий' ? 'text-red-500' : 'text-yellow-500'}>{traderThinking?.marketView || 'Нейтральный'}</span></span>
+  1910→                      <span className="text-muted-foreground">|</span>
+  1911→                      <span className="text-muted-foreground">Позиции: <span className="text-foreground font-mono">{traderThinking?.openPositionsCount || 0}/5</span></span>
+  1912→                      <span className="text-muted-foreground">|</span>
+  1913→                      <span className="text-muted-foreground">Свободно: <span className="font-mono text-foreground">${(traderThinking?.freeBalance || 0).toFixed(2)}</span></span>
+  1914→                    </div>
+  1915→                  </div>
+  1916→                </div>
+  1917→                <div className="flex items-center gap-2">
+  1918→                  {traderThinking?.lastScanAt && (
+  1919→                    <span className="text-[9px] text-muted-foreground">
+  1920→                      Последний скан: {new Date(traderThinking.lastScanAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+  1921→                    </span>
+  1922→                  )}
+  1923→                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => setShowThinkingPanel(false)}>
+  1924→                    <X className="w-4 h-4" />
+  1925→                  </Button>
+  1926→                </div>
+  1927→              </div>
+  1928→              {/* Strategy & quick stats */}
+  1929→              <div className="grid grid-cols-3 gap-2 mt-3">
+  1930→                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 text-center">
+  1931→                  <div className="text-[8px] text-amber-500 uppercase">Стратегия</div>
+  1932→                  <div className="text-[10px] font-bold text-foreground">{traderThinking?.activeStrategy || 'Внутридневная'}</div>
+  1933→                </div>
+  1934→                <div className="rounded-lg border border-border bg-card p-2 text-center">
+  1935→                  <div className="text-[8px] text-muted-foreground uppercase">Эквити</div>
+  1936→                  <div className="text-xs font-mono font-bold text-foreground">${(traderThinking?.totalEquity || 0).toFixed(2)}</div>
+  1937→                </div>
+  1938→                <div className="rounded-lg border border-border bg-card p-2 text-center">
+  1939→                  <div className="text-[8px] text-muted-foreground uppercase">Мыслей</div>
+  1940→                  <div className="text-xs font-mono font-bold text-amber-500">{traderThinking?.thoughts?.length || 0}</div>
+  1941→                </div>
+  1942→              </div>
+  1943→            </div>
+  1944→
+  1945→            {/* Thoughts feed */}
+  1946→            <div className="flex-1 overflow-y-auto p-5 space-y-2">
+  1947→              {!traderThinking?.thoughts || traderThinking.thoughts.length === 0 ? (
+  1948→                <div className="text-center py-10 text-muted-foreground">
+  1949→                  <Brain className="w-10 h-10 mx-auto mb-3 opacity-30" />
+  1950→                  <div className="text-sm">Трейдер ещё не начал думать</div>
+  1951→                  <div className="text-[10px] mt-1">Запустите скан или дождитесь автоматического цикла</div>
+  1952→                </div>
+  1953→              ) : (
+  1954→                traderThinking.thoughts.map((thought: any, i: number) => {
+  1955→                  const emotionColors: Record<string, string> = {
+  1956→                    confident: 'border-emerald-500/40 bg-emerald-500/5',
+  1957→                    cautious: 'border-yellow-500/30 bg-yellow-500/5',
+  1958→                    worried: 'border-red-500/30 bg-red-500/5',
+  1959→                    frustrated: 'border-red-500/40 bg-red-500/10',
+  1960→                    satisfied: 'border-emerald-500/30 bg-emerald-500/5',
+  1961→                    analytical: 'border-blue-500/30 bg-blue-500/5',
+  1962→                    neutral: 'border-border bg-card',
+  1963→                  };
+  1964→                  const emotionIcons: Record<string, string> = {
+  1965→                    confident: '💪', cautious: '⚡', worried: '😰',
+  1966→                    frustrated: '😤', satisfied: '✅', analytical: '🔍', neutral: '📌',
+  1967→                  };
+  1968→                  const typeLabels: Record<string, string> = {
+  1969→                    scan: 'СКАН', decision: 'РЕШЕНИЕ', close: 'ЗАКРЫТИЕ',
+  1970→                    adjustment: 'КОРРЕКТИРОВКА', lesson: 'УРОК', observation: 'НАБЛЮДЕНИЕ',
+  1971→                  };
+  1972→                  const typeColors: Record<string, string> = {
+  1973→                    scan: 'text-blue-400', decision: 'text-amber-400', close: 'text-purple-400',
+  1974→                    adjustment: 'text-orange-400', lesson: 'text-red-400', observation: 'text-zinc-400',
+  1975→                  };
+  1976→
+  1977→                  return (
+  1978→                    <div key={thought.id || i} className={`rounded-xl border p-3 ${emotionColors[thought.emotion] || emotionColors.neutral}`}>
+  1979→                      <div className="flex items-start gap-2">
+  1980→                        <span className="text-base flex-shrink-0 mt-0.5">{emotionIcons[thought.emotion] || '📌'}</span>
+  1981→                        <div className="flex-1 min-w-0">
+  1982→                          <div className="flex items-center gap-2 mb-0.5">
+  1983→                            <span className={`text-[8px] font-bold uppercase ${typeColors[thought.type] || 'text-zinc-400'}`}>
+  1984→                              {typeLabels[thought.type] || thought.type}
+  1985→                            </span>
+  1986→                            {thought.coinSymbol && (
+  1987→                              <Badge variant="outline" className="text-[8px] h-4 px-1">
+  1988→                                {thought.coinSymbol} {thought.direction || ''}
+  1989→                              </Badge>
+  1990→                            )}
+  1991→                            {thought.entryType && (
+  1992→                              <Badge variant="outline" className={`text-[8px] h-4 px-1 ${thought.entryType === 'MARKET' ? 'border-emerald-500/30 text-emerald-500' : 'border-blue-500/30 text-blue-400'}`}>
+  1993→                                {thought.entryType === 'MARKET' ? 'РЫНОК' : 'ЛИМИТ'}
+  1994→                              </Badge>
+  1995→                            )}
+  1996→                            {thought.confidence !== undefined && (
+  1997→                              <span className="text-[8px] text-muted-foreground">conf: {thought.confidence}%</span>
+  1998→                            )}
+  1999→                            <span className="text-[8px] text-muted-foreground ml-auto">
+  2000→                              {new Date(thought.timestamp).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+
+[showing lines 1-2000 of 2034; use offset=2001 with limit to continue reading]

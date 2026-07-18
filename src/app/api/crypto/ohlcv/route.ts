@@ -61,7 +61,7 @@ export async function GET(request: Request) {
       const response = await fetch(url, { cache: 'no-store' });
       if (response.ok) {
         const data = await response.json();
-        if (Array.isArray(data) && data.length > 0 && !data.code) {
+        if (Array.isArray(data) && data.length > 0 && !(data as any).code) {
           const ohlcv = data.map((k: any[]) => ({
             timestamp: k[0], open: parseFloat(k[1]), high: parseFloat(k[2]),
             low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5]),
@@ -100,7 +100,7 @@ export async function GET(request: Request) {
       );
       if (cgResponse.ok) {
         const data = await cgResponse.json();
-        if (Array.isArray(data) && data.length > 0 && !data.status) {
+        if (Array.isArray(data) && data.length > 0 && !(data as any).status) {
           const ohlcv = data.map((candle: number[]) => ({
             timestamp: candle[0], open: candle[1], high: candle[2],
             low: candle[3], close: candle[4], volume: candle[5] || 0,

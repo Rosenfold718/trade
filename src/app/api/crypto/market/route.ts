@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { rateLimit } from '@/lib/rate-limit';
+import { RATE_LIMITS } from '@/lib/api-rate-limits';
 
 const COINGECKO_BASE = 'https://api.coingecko.com/api/v3';
 const BINANCE_BASE = 'https://api.binance.com/api/v3';
@@ -8,10 +10,17 @@ let marketCache: { data: any; timestamp: number } | null = null;
 const CACHE_TTL = 30000; // 30 seconds
 
 export async function GET(request: Request) {
+  const clientIp = request.headers.get('x-forwarded-for') || 'unknown';
+  const { allowed, remaining, resetAt } = rateLimit(`api:market:${clientIp}`, RATE_LIMITS.market);
+  if (!allowed) {
+    const retryAfter = Math.ceil((resetAt - Date.now()) / 1000);
+    return NextResponse.json({ error: 'Rate limit exceeded', retryAfter }, { status: 429, headers: { 'Retry-After': String(retryAfter) } });
+  }
+
   try {
     // Return cached data if fresh
     if (marketCache && Date.now() - marketCache.timestamp < CACHE_TTL) {
-      return NextResponse.json(marketCache.data);
+      return NextResponse.json(marketCache.data, { headers: { 'X-RateLimit-Remaining': String(remaining) } });
     }
     
     const { searchParams } = new URL(request.url);
@@ -50,7 +59,7 @@ export async function GET(request: Request) {
         
         const result = { data: formatted, source: 'coingecko' };
         marketCache = { data: result, timestamp: Date.now() };
-        return NextResponse.json(result);
+        return NextResponse.json(result, { headers: { 'X-RateLimit-Remaining': String(remaining) } });
       }
     }
     

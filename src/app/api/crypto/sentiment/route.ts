@@ -1,13 +1,22 @@
 import { NextResponse } from 'next/server';
+import { rateLimit } from '@/lib/rate-limit';
+import { RATE_LIMITS } from '@/lib/api-rate-limits';
 
 // Crypto sentiment analysis using CoinGecko trending + Fear & Greed
 let cachedSentiment: { data: any; timestamp: number } | null = null;
 const CACHE_TTL = 300000; // 5 min
 
-export async function GET() {
+export async function GET(request: Request) {
+  const clientIp = request.headers.get('x-forwarded-for') || 'unknown';
+  const { allowed, remaining, resetAt } = rateLimit(`api:sentiment:${clientIp}`, RATE_LIMITS.sentiment);
+  if (!allowed) {
+    const retryAfter = Math.ceil((resetAt - Date.now()) / 1000);
+    return NextResponse.json({ error: 'Rate limit exceeded', retryAfter }, { status: 429, headers: { 'Retry-After': String(retryAfter) } });
+  }
+
   try {
     if (cachedSentiment && Date.now() - cachedSentiment.timestamp < CACHE_TTL) {
-      return NextResponse.json(cachedSentiment.data);
+      return NextResponse.json(cachedSentiment.data, { headers: { 'X-RateLimit-Remaining': String(remaining) } });
     }
     
     // Get trending coins
@@ -92,7 +101,7 @@ export async function GET() {
     };
     
     cachedSentiment = { data: result, timestamp: Date.now() };
-    return NextResponse.json(result);
+    return NextResponse.json(result, { headers: { 'X-RateLimit-Remaining': String(remaining) } });
   } catch (error) {
     console.error('Sentiment API error:', error);
     return NextResponse.json({

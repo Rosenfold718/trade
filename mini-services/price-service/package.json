@@ -1,0 +1,5 @@
+{
+  "name": "price-service",
+  "scripts": { "dev": "bun --hot index.ts" },
+  "dependencies": { "socket.io": "^4.8.1" }
+}

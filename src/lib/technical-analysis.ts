@@ -2,6 +2,18 @@
 // Focus: 1m, 5m, 15m, 1h, 4h timeframes for intraday and 1-3 day trades
 // Key improvement: More aggressive signal generation with candlestick patterns, VWAP, volume spikes
 
+import {
+  BINANCE_BASE,
+  BYBIT_BASE,
+  getBinanceSymbol,
+  getBybitSymbol,
+  getBybitInterval,
+  getHigherTimeframes,
+  TIMEFRAME_WEIGHTS,
+  timeframeToKey,
+} from './api-sources';
+import { detectMarketRegime } from './trading-engine';
+
 export interface OHLCV {
   timestamp: number;
   open: number;
@@ -47,12 +59,15 @@ export interface IndicatorResult {
 }
 
 export interface MultiTimeframeResult {
+  m1?: TimeframeVerdict;
   m5?: TimeframeVerdict;
   m15?: TimeframeVerdict;
   h1?: TimeframeVerdict;
   h4?: TimeframeVerdict;
+  d1?: TimeframeVerdict;
   consensus: 'STRONG_LONG' | 'LONG' | 'NEUTRAL' | 'SHORT' | 'STRONG_SHORT';
   alignment: number; // 0-100, how aligned timeframes are
+  regime?: string;   // from trading-engine detectMarketRegime
 }
 
 export interface TimeframeVerdict {
@@ -387,12 +402,13 @@ export interface VolumeAnalysis {
   volumeRatio: number;
   obvTrend: 'RISING' | 'FALLING' | 'FLAT';
   vwapPosition: 'ABOVE' | 'BELOW' | 'AT';
+  vwap: number;
   description: string;
 }
 
 export function analyzeVolume(data: OHLCV[]): VolumeAnalysis {
   if (data.length < 20) {
-    return { signal: null, isVolumeSpike: false, volumeRatio: 1, obvTrend: 'FLAT', vwapPosition: 'AT', description: 'Недостаточно данных' };
+    return { signal: null, isVolumeSpike: false, volumeRatio: 1, obvTrend: 'FLAT', vwapPosition: 'AT', vwap: 0, description: 'Недостаточно данных' };
   }
 
   const closes = data.map(d => d.close);
@@ -449,7 +465,7 @@ export function analyzeVolume(data: OHLCV[]): VolumeAnalysis {
     description = `Объём x${volumeRatio.toFixed(1)} | OBV: ${obvTrend === 'RISING' ? '↑' : obvTrend === 'FALLING' ? '↓' : '→'} | VWAP: ${vwapPosition === 'ABOVE' ? 'выше' : vwapPosition === 'BELOW' ? 'ниже' : 'на'}`;
   }
 
-  return { signal, isVolumeSpike, volumeRatio, obvTrend, vwapPosition, description };
+  return { signal, isVolumeSpike, volumeRatio, obvTrend, vwapPosition, vwap: lastVwap, description };
 }
 
 // ============================================
@@ -861,18 +877,26 @@ export function generateTradeSignal(
   // 8. Volume analysis
   const volumeAnalysis = analyzeVolume(data);
 
-  // 9. Multi-timeframe consensus
+  // 9. Multi-timeframe consensus (up to 4 timeframes with weighted scoring)
   const mtf: MultiTimeframeResult = {
     consensus: 'NEUTRAL',
     alignment: 0,
   };
 
-  const scores: number[] = [tfVerdict.score];
+  // Build weighted score from available timeframe verdicts
+  const allVerdicts: { verdict: TimeframeVerdict; weight: number }[] = [];
+  allVerdicts.push({ verdict: tfVerdict, weight: 1.0 }); // Current TF always weight 1.0
   if (higherTFVerdict) {
-    scores.push(higherTFVerdict.score * 0.7);
+    allVerdicts.push({ verdict: higherTFVerdict, weight: 0.7 }); // Next higher TF
   }
 
-  const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+  let totalWeight = 0;
+  let weightedScore = 0;
+  for (const v of allVerdicts) {
+    weightedScore += v.verdict.score * v.weight;
+    totalWeight += v.weight;
+  }
+  const avgScore = totalWeight > 0 ? weightedScore / totalWeight : 0;
 
   // Candle pattern bonus to avgScore
   let adjustedScore = avgScore;
@@ -889,7 +913,7 @@ export function generateTradeSignal(
 
   const alignment = Math.min(100, Math.abs(adjustedScore) * 1.2);
 
-  // LOWERED consensus thresholds
+  // Consensus thresholds
   if (adjustedScore > 25) mtf.consensus = 'STRONG_LONG';
   else if (adjustedScore > 8) mtf.consensus = 'LONG';
   else if (adjustedScore < -25) mtf.consensus = 'STRONG_SHORT';
@@ -897,10 +921,10 @@ export function generateTradeSignal(
   else mtf.consensus = 'NEUTRAL';
   mtf.alignment = Math.round(alignment);
 
-  // Assign timeframe verdicts
+  // Assign timeframe verdicts to the appropriate keys
   if (timeframe === '1m') {
-    mtf.m5 = tfVerdict; // 1m maps closest to m5
-    if (higherTFVerdict) mtf.m15 = higherTFVerdict;
+    mtf.m1 = tfVerdict;
+    if (higherTFVerdict) mtf.m5 = higherTFVerdict;
   } else if (timeframe === '5m') {
     mtf.m5 = tfVerdict;
     if (higherTFVerdict) mtf.m15 = higherTFVerdict;
@@ -912,6 +936,7 @@ export function generateTradeSignal(
     if (higherTFVerdict) mtf.h4 = higherTFVerdict;
   } else if (timeframe === '4h') {
     mtf.h4 = tfVerdict;
+    if (higherTFVerdict) mtf.d1 = higherTFVerdict;
   }
 
   // 10. Determine direction — LOWERED THRESHOLDS (was ±5, now ±2)
@@ -1362,6 +1387,162 @@ export function generateSignals(data: OHLCV[]): SignalResult {
     forecast,
     tradeSignal,
   };
+}
+
+// ============================================
+// 4-TIMEFRAME CONSENSUS ANALYSIS
+// ============================================
+
+type TFKey = 'm1' | 'm5' | 'm15' | 'h1' | 'h4' | 'd1';
+
+/** Fetch OHLCV from Binance → Bybit fallback for a given coin and interval */
+async function fetchBinanceOHLCV(
+  coinId: string,
+  interval: string,
+  limit: number,
+  timeoutMs: number = 8000,
+): Promise<OHLCV[]> {
+  const binanceSymbol = getBinanceSymbol(coinId);
+  if (binanceSymbol) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      const response = await fetch(
+        `${BINANCE_BASE}/klines?symbol=${binanceSymbol}USDT&interval=${interval}&limit=${limit}`,
+        { cache: 'no-store', signal: ctrl.signal },
+      );
+      clearTimeout(timer);
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data) && data.length > 0 && !(data as any).code) {
+          return data.map((k: any[]) => ({
+            timestamp: k[0], open: parseFloat(k[1]), high: parseFloat(k[2]),
+            low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5]),
+          }));
+        }
+      }
+    } catch { /* fallthrough */ }
+  }
+
+  // Bybit fallback
+  const bybitSymbol = getBybitSymbol(coinId);
+  if (bybitSymbol) {
+    try {
+      const bybitInterval = getBybitInterval(interval);
+      const bybitLimit = Math.min(limit, 200);
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      const response = await fetch(
+        `${BYBIT_BASE}/kline?category=spot&symbol=${bybitSymbol}USDT&interval=${bybitInterval}&limit=${bybitLimit}`,
+        { cache: 'no-store', signal: ctrl.signal },
+      );
+      clearTimeout(timer);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.retCode === 0 && data.result?.list?.length > 0) {
+          const klines = [...data.result.list].reverse();
+          return klines.map((k: string[]) => ({
+            timestamp: parseFloat(k[0]), open: parseFloat(k[1]), high: parseFloat(k[2]),
+            low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5]),
+          }));
+        }
+      }
+    } catch { /* fallthrough */ }
+  }
+
+  return [];
+}
+
+/**
+ * Analyze multiple timeframes in parallel and compute a weighted consensus.
+ *
+ * Weighted scoring:
+ *   Current TF:     1.0
+ *   Next higher:    0.7
+ *   Two levels up:  0.5
+ *   Three levels up: 0.3
+ */
+export async function analyzeMultiTimeframe(
+  coinId: string,
+  interval: string,
+  currentOHLCV: OHLCV[],
+): Promise<MultiTimeframeResult> {
+  const emptyResult: MultiTimeframeResult = { consensus: 'NEUTRAL', alignment: 0 };
+
+  // Determine the hierarchy of timeframes to fetch
+  const timeframes = getHigherTimeframes(interval);
+  // First entry is the current TF — we already have its data
+  const higherTFs = timeframes.slice(1); // timeframes beyond the current one
+
+  // Fetch all higher TFs in parallel
+  const fetchPromises = higherTFs.map(tf =>
+    fetchBinanceOHLCV(coinId, tf, 80, 6000)
+      .then(data => ({ tf, data }))
+      .catch(() => ({ tf, data: [] as OHLCV[] })),
+  );
+
+  const results = await Promise.allSettled(fetchPromises);
+  const tfDataMap = new Map<string, OHLCV[]>();
+  tfDataMap.set(interval, currentOHLCV);
+
+  for (const r of results) {
+    if (r.status === 'fulfilled' && r.value.data.length >= 20) {
+      tfDataMap.set(r.value.tf, r.value.data);
+    }
+  }
+
+  // Analyze each timeframe
+  const verdicts: { key: TFKey; verdict: TimeframeVerdict; weight: number }[] = [];
+  for (let i = 0; i < timeframes.length; i++) {
+    const tf = timeframes[i];
+    const data = tfDataMap.get(tf);
+    if (!data || data.length < 20) continue;
+
+    const key = timeframeToKey(tf);
+    if (!key) continue;
+
+    const verdict = analyzeTimeframe(data);
+    const weight = TIMEFRAME_WEIGHTS[i] ?? 0.3;
+    verdicts.push({ key, verdict, weight });
+  }
+
+  if (verdicts.length === 0) return emptyResult;
+
+  // Calculate weighted score
+  let totalWeight = 0;
+  let weightedScore = 0;
+  for (const v of verdicts) {
+    weightedScore += v.verdict.score * v.weight;
+    totalWeight += v.weight;
+  }
+  const avgScore = totalWeight > 0 ? weightedScore / totalWeight : 0;
+
+  // Build the MultiTimeframeResult with per-TF verdicts
+  const mtf: MultiTimeframeResult = { consensus: 'NEUTRAL', alignment: 0 };
+  for (const v of verdicts) {
+    (mtf as Record<TFKey, TimeframeVerdict | undefined>)[v.key] = v.verdict;
+  }
+
+  // Consensus thresholds
+  if (avgScore > 25) mtf.consensus = 'STRONG_LONG';
+  else if (avgScore > 8) mtf.consensus = 'LONG';
+  else if (avgScore < -25) mtf.consensus = 'STRONG_SHORT';
+  else if (avgScore < -8) mtf.consensus = 'SHORT';
+  else mtf.consensus = 'NEUTRAL';
+
+  // Alignment: how many TFs agree on direction
+  const bullish = verdicts.filter(v => v.verdict.direction === 'BULLISH').length;
+  const bearish = verdicts.filter(v => v.verdict.direction === 'BEARISH').length;
+  const maxAgreement = Math.max(bullish, bearish);
+  mtf.alignment = Math.round((maxAgreement / verdicts.length) * 100);
+
+  // Market regime from trading engine (uses current TF data)
+  try {
+    const regimeResult = detectMarketRegime(currentOHLCV);
+    mtf.regime = regimeResult.regime;
+  } catch { /* ignore */ }
+
+  return mtf;
 }
 
 // ============================================

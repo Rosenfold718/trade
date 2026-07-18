@@ -1,110 +1,26 @@
 import { NextResponse } from 'next/server';
-import { generateSignals, generateTradeSignal, formatChartData, type OHLCV } from '@/lib/technical-analysis';
+import { rateLimit } from '@/lib/rate-limit';
+import { RATE_LIMITS } from '@/lib/api-rate-limits';
+import {
+  generateSignals,
+  generateTradeSignal,
+  analyzeMultiTimeframe,
+  formatChartData,
+  type OHLCV,
+} from '@/lib/technical-analysis';
+import {
+  BINANCE_BASE,
+  COINGECKO_BASE,
+  BYBIT_BASE,
+  COINGECKO_TO_BINANCE,
+  COINGECKO_TO_BYBIT,
+  getBinanceSymbol,
+  getBybitSymbol,
+  getBybitInterval,
+} from '@/lib/api-sources';
+import { fetchSentimentData, calculateSentimentAdjustment } from '@/lib/sentiment-engine';
 
-const BINANCE_BASE = 'https://api.binance.com/api/v3';
-const COINGECKO_BASE = 'https://api.coingecko.com/api/v3';
-const BYBIT_BASE = 'https://api.bybit.com/v5/market';
-
-// Binance USDT trading pairs
-const COINGECKO_TO_BINANCE: Record<string, string> = {
-  'bitcoin': 'BTC', 'ethereum': 'ETH', 'binancecoin': 'BNB',
-  'solana': 'SOL', 'ripple': 'XRP', 'cardano': 'ADA',
-  'dogecoin': 'DOGE', 'avalanche-2': 'AVAX', 'polkadot': 'DOT',
-  'chainlink': 'LINK', 'litecoin': 'LTC', 'uniswap': 'UNI',
-  'cosmos': 'ATOM', 'ethereum-classic': 'ETC', 'near': 'NEAR',
-  'aave': 'AAVE', 'filecoin': 'FIL', 'aptos': 'APT',
-  'arbitrum': 'ARB', 'optimism': 'OP', 'sui': 'SUI',
-  'injective-protocol': 'INJ', 'pepe': 'PEPE', 'shiba-inu': 'SHIB',
-  'tron': 'TRX', 'toncoin': 'TON', 'stellar': 'XLM',
-  'render-token': 'RNDR', 'fetch-ai': 'FET', 'thorchain': 'RUNE',
-  'maker': 'MKR', 'the-graph': 'GRT', 'vechain': 'VET',
-  'algorand': 'ALGO', 'usd-coin': 'USDC', 'tether': 'USDT',
-  'hedera-hashgraph': 'HBAR', 'sei-network': 'SEI',
-  'dogwifcoin': 'WIF', 'polygon-ecosystem-token': 'POL',
-  'immutable-x': 'IMX', 'conflux': 'CFX',
-  'bonk': 'BONK', 'celestia': 'TIA', 'starknet': 'STRK',
-  'worldcoin-wld': 'WLD', 'jupiter-exchange-solana': 'JUP',
-  'pendle': 'PENDLE', 'ondo-finance': 'ONDO', 'beam-2': 'BEAM',
-  'enjincoin': 'ENJ', 'gala': 'GALA', 'sandox': 'SAND',
-  'decentraland': 'MANA', 'axie-infinity': 'AXS', 'the-sandbox': 'SAND',
-  'tezos': 'XTZ', 'flow': 'FLOW',
-  'chiliz': 'CHZ', 'curve-dao-token': 'CRV', 'compound-governance-token': 'COMP',
-  'synthetix-network-token': 'SNX', '1inch': '1INCH',
-  'pancakeswap-token': 'CAKE', 'sushi': 'SUSHI',
-  'iota': 'IOTA', 'zilliqa': 'ZIL', 'qtum': 'QTUM',
-  'nexo': 'NEXO', 'fantom': 'FTM',
-  'btc': 'BTC', 'eth': 'ETH', 'bnb': 'BNB', 'sol': 'SOL',
-  'xrp': 'XRP', 'ada': 'ADA', 'doge': 'DOGE', 'avax': 'AVAX',
-  'dot': 'DOT', 'link': 'LINK', 'ltc': 'LTC', 'uni': 'UNI',
-  'atom': 'ATOM', 'near': 'NEAR', 'aave': 'AAVE', 'fil': 'FIL',
-  'apt': 'APT', 'arb': 'ARB', 'op': 'OP', 'sui': 'SUI',
-  'inj': 'INJ', 'pepe': 'PEPE', 'shib': 'SHIB', 'trx': 'TRX',
-  'ton': 'TON', 'xlm': 'XLM', 'etc': 'ETC', 'ftm': 'FTM',
-};
-
-const COINGECKO_TO_BYBIT: Record<string, string> = {
-  'mantle': 'MNT', 'kaspa': 'KAS', 'kucoin-shares': 'KCS',
-  'render-token': 'RENDER', 'fantom': 'FTM', 'omisego': 'OMG',
-  'bitcoin': 'BTC', 'ethereum': 'ETH', 'binancecoin': 'BNB',
-  'solana': 'SOL', 'ripple': 'XRP', 'cardano': 'ADA',
-  'dogecoin': 'DOGE', 'avalanche-2': 'AVAX', 'polkadot': 'DOT',
-  'chainlink': 'LINK', 'litecoin': 'LTC', 'uniswap': 'UNI',
-  'cosmos': 'ATOM', 'ethereum-classic': 'ETC', 'near': 'NEAR',
-  'aave': 'AAVE', 'filecoin': 'FIL', 'aptos': 'APT',
-  'arbitrum': 'ARB', 'optimism': 'OP', 'sui': 'SUI',
-  'injective-protocol': 'INJ', 'pepe': 'PEPE', 'shiba-inu': 'SHIB',
-  'tron': 'TRX', 'toncoin': 'TON', 'stellar': 'XLM',
-  'fetch-ai': 'FET', 'thorchain': 'RUNE',
-  'maker': 'MKR', 'the-graph': 'GRT', 'vechain': 'VET',
-  'algorand': 'ALGO', 'hedera-hashgraph': 'HBAR', 'sei-network': 'SEI',
-  'dogwifcoin': 'WIF', 'polygon-ecosystem-token': 'POL',
-  'immutable-x': 'IMX', 'conflux': 'CFX',
-  'bonk': 'BONK', 'celestia': 'TIA', 'starknet': 'STRK',
-  'worldcoin-wld': 'WLD', 'jupiter-exchange-solana': 'JUP',
-  'pendle': 'PENDLE', 'ondo-finance': 'ONDO', 'beam-2': 'BEAM',
-  'enjincoin': 'ENJ', 'gala': 'GALA', 'sandox': 'SAND',
-  'decentraland': 'MANA', 'axie-infinity': 'AXS', 'the-sandbox': 'SAND',
-  'tezos': 'XTZ', 'flow': 'FLOW',
-  'chiliz': 'CHZ', 'curve-dao-token': 'CRV', 'compound-governance-token': 'COMP',
-  'synthetix-network-token': 'SNX', '1inch': '1INCH',
-  'pancakeswap-token': 'CAKE', 'sushi': 'SUSHI',
-  'iota': 'IOTA', 'zilliqa': 'ZIL', 'qtum': 'QTUM',
-  'nexo': 'NEXO',
-};
-
-function getBinanceSymbol(coinId: string): string | null {
-  if (COINGECKO_TO_BINANCE[coinId]) return COINGECKO_TO_BINANCE[coinId];
-  const upper = coinId.toUpperCase().replace(/-/g, '');
-  if (upper.length <= 6) return upper;
-  return null;
-}
-
-function getBybitSymbol(coinId: string): string | null {
-  if (COINGECKO_TO_BYBIT[coinId]) return COINGECKO_TO_BYBIT[coinId];
-  const upper = coinId.toUpperCase().replace(/-/g, '');
-  if (upper.length <= 6) return upper;
-  return null;
-}
-
-// Convert Bybit interval format
-function getBybitInterval(interval: string): string {
-  const map: Record<string, string> = {
-    '1m': '1', '3m': '3', '5m': '5', '15m': '15', '30m': '30',
-    '1h': '60', '2h': '120', '4h': '240', '6h': '360',
-    '12h': '720', '1d': 'D', '1w': 'W',
-  };
-  return map[interval] || '60';
-}
-
-// Binance interval → next higher timeframe
-function getHigherTimeframe(interval: string): string {
-  const map: Record<string, string> = {
-    '1m': '5m', '5m': '15m', '15m': '1h', '1h': '4h', '4h': '1d',
-  };
-  return map[interval] || '1h';
-}
-
-// Convert CoinGecko market_chart data to OHLCV
+// Convert CoinGecko market_chart data to OHLCV (daily)
 function marketChartToOHLCV(prices: number[][], volumes: number[][]): OHLCV[] {
   if (prices.length === 0) return [];
   const dayMap = new Map<string, { timestamp: number; open: number; high: number; low: number; close: number; volume: number }>();
@@ -126,6 +42,7 @@ function marketChartToOHLCV(prices: number[][], volumes: number[][]): OHLCV[] {
   return Array.from(dayMap.values()).sort((a, b) => a.timestamp - b.timestamp);
 }
 
+// Convert CoinGecko market_chart data to hourly OHLCV
 function hourlyToOHLCV(prices: number[][], volumes: number[][]): OHLCV[] {
   if (prices.length === 0) return [];
   const hourMap = new Map<number, { timestamp: number; open: number; high: number; low: number; close: number; volume: number }>();
@@ -149,8 +66,8 @@ function hourlyToOHLCV(prices: number[][], volumes: number[][]): OHLCV[] {
 
 // Fetch OHLCV from multiple sources with fallback
 async function fetchOHLCV(coinId: string, interval: string, limit: number): Promise<{ data: OHLCV[]; source: string }> {
-  const timeoutMs = 8000; // 8s timeout per source
-  
+  const timeoutMs = 8000;
+
   // Strategy 1: Binance
   const binanceSymbol = getBinanceSymbol(coinId);
   if (binanceSymbol) {
@@ -165,7 +82,7 @@ async function fetchOHLCV(coinId: string, interval: string, limit: number): Prom
       clearTimeout(timer);
       if (response.ok) {
         const data = await response.json();
-        if (Array.isArray(data) && data.length > 0 && !data.code) {
+        if (Array.isArray(data) && data.length > 0 && !(data as any).code) {
           const ohlcv = data.map((k: any[]) => ({
             timestamp: k[0], open: parseFloat(k[1]), high: parseFloat(k[2]),
             low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5]),
@@ -215,7 +132,7 @@ async function fetchOHLCV(coinId: string, interval: string, limit: number): Prom
     clearTimeout(timer3);
     if (cgResponse.ok) {
       const data = await cgResponse.json();
-      if (Array.isArray(data) && data.length > 0 && !data.status) {
+      if (Array.isArray(data) && data.length > 0 && !(data as any).status) {
         const ohlcv = data.map((candle: number[]) => ({
           timestamp: candle[0], open: candle[1], high: candle[2],
           low: candle[3], close: candle[4], volume: candle[5] || 0,
@@ -261,7 +178,6 @@ function cleanCache() {
       if (now - value.timestamp > CACHE_TTL) keysToDelete.push(key);
     }
     keysToDelete.forEach(k => cache.delete(k));
-    // If still too large, delete oldest
     if (cache.size > MAX_CACHE_SIZE) {
       const entries = [...cache.entries()].sort((a, b) => a[1].timestamp - b[1].timestamp);
       for (let i = 0; i < entries.length - MAX_CACHE_SIZE / 2; i++) {
@@ -269,21 +185,28 @@ function cleanCache() {
       }
     }
   }
-  // Force GC hint if available
   if (global.gc) global.gc();
 }
 
 export async function GET(request: Request) {
+  const clientIp = request.headers.get('x-forwarded-for') || 'unknown';
+  const { allowed, remaining, resetAt } = rateLimit(`api:signals:${clientIp}`, RATE_LIMITS.signals);
+  if (!allowed) {
+    const retryAfter = Math.ceil((resetAt - Date.now()) / 1000);
+    return NextResponse.json({ error: 'Rate limit exceeded', retryAfter }, { status: 429, headers: { 'Retry-After': String(retryAfter) } });
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('coin') || 'bitcoin';
-    const interval = searchParams.get('interval') || '1h'; // Default to 1h for intraday
+    const interval = searchParams.get('interval') || '1h';
     const days = searchParams.get('days') || '1';
+    const skipMultiTF = searchParams.get('skipMultiTF') === 'true'; // allow disabling 4-TF for speed
 
     const cacheKey = `${id}-${interval}-${days}`;
     const cached = cache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      return NextResponse.json(cached.data);
+      return NextResponse.json(cached.data, { headers: { 'X-RateLimit-Remaining': String(remaining) } });
     }
 
     // Determine candle limits based on interval
@@ -291,27 +214,26 @@ export async function GET(request: Request) {
     let currentInterval: string;
     switch (interval) {
       case '1m':
-        limit = 200;  // ~3 hours of 1m candles
+        limit = 200;
         currentInterval = '1m';
         break;
       case '5m':
-        limit = 200;  // ~16 hours of 5m candles
+        limit = 200;
         currentInterval = '5m';
         break;
       case '15m':
-        limit = 200;  // ~50 hours of 15m candles
+        limit = 200;
         currentInterval = '15m';
         break;
       case '1h':
-        limit = 168;  // 7 days of hourly candles
+        limit = 168;
         currentInterval = '1h';
         break;
       case '4h':
-        limit = 180;  // 30 days of 4h candles
+        limit = 180;
         currentInterval = '4h';
         break;
       default:
-        // Legacy "days" parameter support
         const d = parseInt(days);
         if (d <= 1) { limit = 48; currentInterval = '1h'; }
         else if (d <= 3) { limit = 72; currentInterval = '1h'; }
@@ -328,30 +250,56 @@ export async function GET(request: Request) {
       );
     }
 
-    // Fetch higher timeframe data for multi-timeframe analysis
-    // Only fetch if we have enough current TF data and cache doesn't have it
-    const higherInterval = getHigherTimeframe(currentInterval);
-    let higherTFData: OHLCV[] | undefined;
-    const htfCacheKey = `${id}-${higherInterval}-htf`;
-    const htfCached = cache.get(htfCacheKey);
-    if (htfCached && Date.now() - htfCached.timestamp < CACHE_TTL * 3) {
-      higherTFData = htfCached.data;
-    } else {
-      try {
-        const htfResult = await fetchOHLCV(id, higherInterval, 60);
-        if (htfResult.data.length >= 20) {
-          higherTFData = htfResult.data;
-          cache.set(htfCacheKey, { data: higherTFData, timestamp: Date.now() });
-        }
-      } catch { /* ignore */ }
-    }
+    // Generate the trade signal with single higher-TF (backward-compatible, fast path)
+    const tradeSignal = generateTradeSignal(ohlcvData, currentInterval);
 
-    // Generate the trade signal with multi-timeframe analysis
-    const tradeSignal = generateTradeSignal(ohlcvData, currentInterval, higherTFData);
+    // === 4-TIMEFRAME ANALYSIS (async, optional) ===
+    if (!skipMultiTF) {
+      try {
+        const mtfResult = await analyzeMultiTimeframe(id, currentInterval, ohlcvData);
+        tradeSignal.multiTimeframe = mtfResult;
+      } catch (e) {
+        // If 4-TF fails, keep the existing single-TF result — no breakage
+        console.warn('4-TF analysis failed, keeping single-TF result:', e);
+      }
+    }
 
     // Also generate the legacy signal for compatibility
     const signalResult = generateSignals(ohlcvData);
     const chartData = formatChartData(ohlcvData);
+
+    // === SENTIMENT INTEGRATION ===
+    let sentimentAdjustment: { confidenceModifier: number; positionSizeModifier: number; skipSignal: boolean; reason: string } | undefined;
+    try {
+      const sentimentData = await fetchSentimentData();
+      if (sentimentData && tradeSignal.direction !== 'FLAT') {
+        const adjustment = calculateSentimentAdjustment({
+          fearGreedValue: sentimentData.fearGreedValue,
+          overallSentiment: sentimentData.overallSentiment,
+          trendDirection: tradeSignal.trend,
+          regime: tradeSignal.multiTimeframe?.regime ?? 'RANGING',
+        });
+
+        sentimentAdjustment = {
+          confidenceModifier: adjustment.confidenceModifier,
+          positionSizeModifier: adjustment.positionSizeModifier,
+          skipSignal: adjustment.skipSignal,
+          reason: adjustment.reason,
+        };
+
+        // Apply confidence adjustment
+        tradeSignal.confidence = Math.max(5, Math.min(99, tradeSignal.confidence + adjustment.confidenceModifier));
+
+        // If sentiment says skip, flip to FLAT
+        if (adjustment.skipSignal) {
+          tradeSignal.direction = 'FLAT';
+          tradeSignal.confidence = 0;
+          tradeSignal.warnings.push(`Сигнал заблокирован настроениями: ${adjustment.reason}`);
+        }
+      }
+    } catch {
+      // Sentiment failure — keep original signal
+    }
 
     const result = {
       signal: signalResult,
@@ -361,13 +309,13 @@ export async function GET(request: Request) {
       source,
       interval: currentInterval,
       candlesCount: ohlcvData.length,
-      higherTFSource: higherTFData.length > 0 ? 'available' : 'unavailable',
+      sentimentAdjustment: sentimentAdjustment ?? null,
     };
 
     cache.set(cacheKey, { data: result, timestamp: Date.now() });
     cleanCache();
 
-    return NextResponse.json(result);
+    return NextResponse.json(result, { headers: { 'X-RateLimit-Remaining': String(remaining) } });
   } catch (error) {
     console.error('Signals API error:', error);
     return NextResponse.json({ error: 'Ошибка анализа. Попробуйте позже.' }, { status: 500 });

@@ -1,0 +1,502 @@
+     1→     1→'use client';
+     2→     2→
+     3→     3→import React, { useState, useEffect, useCallback, useRef } from 'react';
+     4→     4→import {
+     5→     5→  TrendingUp, TrendingDown, Activity, BarChart3,
+     6→     6→  RefreshCw, Search, ArrowUpRight, ArrowDownRight,
+     7→     7→  Zap, Target, AlertTriangle, Clock,
+     8→     8→  LineChart, Shield, Eye, Cpu,
+     9→     9→  ChevronUp, ChevronDown, Loader2,
+    10→    10→  Gauge, Crosshair, X, AlertCircle, CheckCircle2,
+    11→    11→  Timer, MoveUp, MoveDown, Pause, Flame, Snowflake,
+    12→    12→  Copy, Check, Volume2, CandlestickChart, MessageSquare, Brain, Sparkles,
+    13→    13→  ExternalLink, DollarSign, TrendingUpIcon, Trash2
+    14→    14→} from 'lucide-react';
+    15→    15→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+    16→    16→import { Badge } from '@/components/ui/badge';
+    17→    17→import { Button } from '@/components/ui/button';
+    18→    18→import { Input } from '@/components/ui/input';
+    19→    19→import { ScrollArea } from '@/components/ui/scroll-area';
+    20→    20→import { Progress } from '@/components/ui/progress';
+    21→    21→import { Separator } from '@/components/ui/separator';
+    22→    22→import { Slider } from '@/components/ui/slider';
+    23→    23→
+    24→    24→// Types
+    25→    25→interface CoinData {
+    26→    26→  id: string; symbol: string; name: string; image?: string;
+    27→    27→  current_price: number; market_cap: number; market_cap_rank: number;
+    28→    28→  total_volume: number; price_change_percentage_24h: number;
+    29→    29→  sparkline_in_7d: number[]; high_24h: number; low_24h: number;
+    30→    30→}
+    31→    31→
+    32→    32→interface TradeSignal {
+    33→    33→  direction: 'LONG' | 'SHORT' | 'FLAT';
+    34→    34→  confidence: number;
+    35→    35→  entry: number;
+    36→    36→  entryType: 'LIMIT' | 'MARKET';
+    37→    37→  entryReason: string;
+    38→    38→  stopLoss: number;
+    39→    39→  takeProfit1: number;
+    40→    40→  takeProfit2: number;
+    41→    41→  takeProfit3: number;
+    42→    42→  riskReward: number;
+    43→    43→  holdDuration: string;
+    44→    44→  holdDurationHours: number;
+    45→    45→  reasons: string[];
+    46→    46→  warnings: string[];
+    47→    47→  indicators: IndicatorResult[];
+    48→    48→  multiTimeframe: MultiTimeframeResult;
+    49→    49→  currentPrice: number;
+    50→    50→  atr: number;
+    51→    51→  support: number;
+    52→    52→  resistance: number;
+    53→    53→  trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+    54→    54→  momentum: 'STRONG' | 'MODERATE' | 'WEAK';
+    55→    55→  candlePattern: string | null;
+    56→    56→  volumeSignal: string | null;
+    57→    57→}
+    58→    58→
+    59→    59→interface IndicatorResult {
+    60→    60→  name: string; value: number | string;
+    61→    61→  signal: 'BUY' | 'SELL' | 'NEUTRAL'; description: string; weight: number;
+    62→    62→}
+    63→    63→
+    64→    64→interface MultiTimeframeResult {
+    65→    65→  m5?: TimeframeVerdict;
+    66→    66→  m15?: TimeframeVerdict;
+    67→    67→  h1?: TimeframeVerdict;
+    68→    68→  h4?: TimeframeVerdict;
+    69→    69→  consensus: string;
+    70→    70→  alignment: number;
+    71→    71→}
+    72→    72→
+    73→    73→interface TimeframeVerdict {
+    74→    74→  direction: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+    75→    75→  score: number;
+    76→    76→  trend: string;
+    77→    77→  keyLevel: string;
+    78→    78→}
+    79→    79→
+    80→    80→interface SignalResult {
+    81→    81→  type: 'BUY' | 'SELL' | 'HOLD';
+    82→    82→  strength: number;
+    83→    83→  indicators: IndicatorResult[];
+    84→    84→  summary: string;
+    85→    85→  forecast?: any;
+    86→    86→  tradeSignal?: TradeSignal;
+    87→    87→}
+    88→    88→
+    89→    89→interface ChartDataPoint {
+    90→    90→  timestamp: number; date: string; time: string;
+    91→    91→  open: number; high: number; low: number; close: number; volume: number;
+    92→    92→  ema9?: number; ema21?: number;
+    93→    93→  bbUpper?: number; bbLower?: number;
+    94→    94→  rsi?: number; macd?: number; macdSignal?: number; macdHist?: number;
+    95→    95→}
+    96→    96→
+    97→    97→interface PositionTool {
+    98→    98→  enabled: boolean;
+    99→    99→  direction: 'LONG' | 'SHORT';
+   100→   100→  entryPrice: number;
+   101→   101→  targetPrice: number;
+   102→   102→  stopLoss: number;
+   103→   103→  amount: number;
+   104→   104→  leverage: number;
+   105→   105→}
+   106→   106→
+   107→   107→interface SentimentData {
+   108→   108→  overallSentiment: string; sentimentScore: number;
+   109→   109→  fearGreed: { value: number; classification: string };
+   110→   110→  recommendation: string;
+   111→   111→  newsAnalysis: { bullish_factors: string[]; bearish_factors: string[] };
+   112→   112→  source: string;
+   113→   113→}
+   114→   114→
+   115→   115→interface Trade {
+   116→   116→  id: string;
+   117→   117→  coinId: string;
+   118→   118→  coinSymbol: string;
+   119→   119→  direction: 'LONG' | 'SHORT';
+   120→   120→  entryType: 'LIMIT' | 'MARKET';
+   121→   121→  entry: number;
+   122→   122→  currentPrice: number;
+   123→   123→  stopLoss: number;
+   124→   124→  takeProfit1: number;
+   125→   125→  takeProfit2: number;
+   126→   126→  takeProfit3: number;
+   127→   127→  confidence: number;
+   128→   128→  timeframe: string;
+   129→   129→  entryReason: string;
+   130→   130→  reasons: string[];
+   131→   131→  leverage: number;
+   132→   132→  positionSize: number;
+   133→   133→  quantity: number;
+   134→   134→  timestamp: number;
+   135→   135→  entryReached: boolean;
+   136→   136→  enteredAt: number | null;
+   137→   137→  resolved: boolean;
+   138→   138→  result: 'WIN' | 'LOSS' | 'EXPIRED' | null;
+   139→   139→  exitPrice: number | null;
+   140→   140→  exitReason: string | null;
+   141→   141→  closedAt: number | null;
+   142→   142→  pnlUSDT: number | null;
+   143→   143→  pnlPct: number | null;
+   144→   144→  pointsChange: number | null;
+   145→   145→}
+   146→   146→
+   147→   147→interface DepositSnapshot {
+   148→   148→  timestamp: number;
+   149→   149→  balance: number;
+   150→   150→  equity: number;
+   151→   151→}
+   152→   152→
+   153→   153→interface DebtEntry {
+   154→   154→  timestamp: number;
+   155→   155→  amount: number;
+   156→   156→  remainingOwed: number;
+   157→   157→  label: string;
+   158→   158→}
+   159→   159→
+   160→   160→interface Lesson {
+   161→   161→  type: string;
+   162→   162→  description: string;
+   163→   163→  coinId?: string;
+   164→   164→  direction?: 'LONG' | 'SHORT';
+   165→   165→  value?: number;
+   166→   166→  timestamp: number;
+   167→   167→  tradeId: string;
+   168→   168→  severity: 'low' | 'medium' | 'high';
+   169→   169→}
+   170→   170→
+   171→   171→interface AdaptiveParams {
+   172→   172→  minSlDistancePct: number;
+   173→   173→  minConfidence: number;
+   174→   174→  avoidCoins: string[];
+   175→   175→  minRr: number;
+   176→   176→  counterTrendPenalty: number;
+   177→   177→  limitExpiryHours: number;
+   178→   178→  marketEntryConditions: string[];
+   179→   179→  lessons: Lesson[];
+   180→   180→  lessonsVersion: number;
+   181→   181→}
+   182→   182→
+   183→   183→interface ReputationData {
+   184→   184→  initialDeposit: number;
+   185→   185→  balance: number;
+   186→   186→  totalTrades: number;
+   187→   187→  wins: number;
+   188→   188→  losses: number;
+   189→   189→  expired: number;
+   190→   190→  score: number;
+   191→   191→  winRate: number;
+   192→   192→  avgPnl: number;
+   193→   193→  streak: number;
+   194→   194→  bestTrade: number;
+   195→   195→  worstTrade: number;
+   196→   196→  totalPnl: number;
+   197→   197→  level: string;
+   198→   198→  levelEmoji: string;
+   199→   199→  riskPerTrade: number;
+   200→   200→  defaultLeverage: number;
+   201→   201→  trades: Trade[];
+   202→   202→  depositHistory: DepositSnapshot[];
+   203→   203→  lastUpdated: number;
+   204→   204→  totalDebt: number;
+   205→   205→  debtHistory: DebtEntry[];
+   206→   206→  totalRepaid: number;
+   207→   207→  lockedInPositions: number;
+   208→   208→  freeBalance: number;
+   209→   209→  adaptive: AdaptiveParams;
+   210→   210→}
+   211→   211→
+   212→   212→function formatPrice(price: number): string {
+   213→   213→  if (!price || !isFinite(price)) return '0.00';
+   214→   214→  if (price >= 1000) return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+   215→   215→  if (price >= 1) return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+   216→   216→  if (price >= 0.01) return price.toFixed(4);
+   217→   217→  if (price >= 0.0001) return price.toFixed(6);
+   218→   218→  return price.toFixed(8);
+   219→   219→}
+   220→   220→
+   221→   221→function formatNumber(num: number): string {
+   222→   222→  if (num >= 1e12) return `$${(num / 1e12).toFixed(2)}T`;
+   223→   223→  if (num >= 1e9) return `$${(num / 1e9).toFixed(2)}B`;
+   224→   224→  if (num >= 1e6) return `$${(num / 1e6).toFixed(2)}M`;
+   225→   225→  return `$${num.toLocaleString()}`;
+   226→   226→}
+   227→   227→
+   228→   228→function formatTimeAgo(ts: number): string {
+   229→   229→  const diff = Date.now() - ts;
+   230→   230→  if (diff < 60000) return 'только что';
+   231→   231→  if (diff < 3600000) return `${Math.floor(diff / 60000)} мин`;
+   232→   232→  if (diff < 86400000) return `${Math.floor(diff / 3600000)} ч`;
+   233→   233→  return new Date(ts).toLocaleDateString('ru-RU');
+   234→   234→}
+   235→   235→
+   236→   236→function pctChange(from: number, to: number): string {
+   237→   237→  if (from === 0) return '0.00';
+   238→   238→  const pct = ((to - from) / from) * 100;
+   239→   239→  return `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+   240→   240→}
+   241→   241→
+   242→   242→// Candlestick Chart
+   243→   243→function CandlestickChartComponent({ data, overlayIndicators, positionTool, tradeSignal }: {
+   244→   244→  data: ChartDataPoint[]; overlayIndicators: boolean; positionTool: PositionTool | null; tradeSignal: TradeSignal | null;
+   245→   245→}) {
+   246→   246→  if (data.length === 0) return null;
+   247→   247→  const width = 960, height = 480;
+   248→   248→  const margin = { top: 20, right: 70, bottom: 30, left: 10 };
+   249→   249→  const chartW = width - margin.left - margin.right;
+   250→   250→  const chartH = height - margin.top - margin.bottom;
+   251→   251→  const prices = data.flatMap(d => [d.high, d.low]).filter(v => v > 0);
+   252→   252→  if (positionTool?.enabled) { prices.push(positionTool.entryPrice, positionTool.targetPrice, positionTool.stopLoss); }
+   253→   253→  if (tradeSignal && tradeSignal.direction !== 'FLAT') { prices.push(tradeSignal.entry, tradeSignal.stopLoss, tradeSignal.takeProfit2, tradeSignal.takeProfit1); }
+   254→   254→  const minP = Math.min(...prices), maxP = Math.max(...prices), range = maxP - minP || 1, padding = range * 0.08;
+   255→   255→  const yMin = minP - padding, yMax = maxP + padding, yRange = yMax - yMin;
+   256→   256→  const yScale = (v: number) => margin.top + chartH - ((v - yMin) / yRange) * chartH;
+   257→   257→  const xScale = (i: number) => margin.left + (i / (data.length - 1 || 1)) * chartW;
+   258→   258→  const candleW = Math.max(2, Math.min(20, (chartW / data.length) * 0.6));
+   259→   259→  const formatY = (v: number) => {
+   260→   260→    if (v >= 10000) return `$${(v/1000).toFixed(1)}k`;
+   261→   261→    if (v >= 1000) return `$${v.toLocaleString('en-US', {maximumFractionDigits: 0})}`;
+   262→   262→    if (v >= 1) return `$${v.toFixed(2)}`;
+   263→   263→    if (v >= 0.01) return `$${v.toFixed(4)}`;
+   264→   264→    return `$${v.toFixed(6)}`;
+   265→   265→  };
+   266→   266→  const ema9Data = data.map((d, i) => d.ema9 ? { x: xScale(i), y: yScale(d.ema9) } : null).filter(Boolean);
+   267→   267→  const ema21Data = data.map((d, i) => d.ema21 ? { x: xScale(i), y: yScale(d.ema21) } : null).filter(Boolean);
+   268→   268→  const linePath = (points: { x: number; y: number }[]) => points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ');
+   269→   269→  const ticks = Array.from({ length: 6 }, (_, i) => yMin + (yRange * i) / 5);
+   270→   270→  const ts = tradeSignal, pt = positionTool, hasPosition = pt?.enabled && pt.entryPrice > 0;
+   271→   271→  const targetPnl = hasPosition ? (pt!.direction === 'LONG' ? ((pt!.targetPrice - pt!.entryPrice) / pt!.entryPrice) : ((pt!.entryPrice - pt!.targetPrice) / pt!.entryPrice)) * pt!.amount * pt!.leverage : 0;
+   272→   272→  const stopPnl = hasPosition ? (pt!.direction === 'LONG' ? ((pt!.stopLoss - pt!.entryPrice) / pt!.entryPrice) : ((pt!.entryPrice - pt!.stopLoss) / pt!.entryPrice)) * pt!.amount * pt!.leverage : 0;
+   273→   273→  const rr = hasPosition && stopPnl !== 0 ? Math.abs(targetPnl / stopPnl) : 0;
+   274→   274→
+   275→   275→  const LevelLine = ({ price, color, label, opacity = 1 }: { price: number; color: string; label: string; opacity?: number }) => {
+   276→   276→    if (price <= 0) return null; const y = yScale(price); if (y < margin.top || y > margin.top + chartH) return null;
+   277→   277→    const priceLabel = formatPrice(price);
+   278→   278→    const labelW = Math.max(62, (label.length + priceLabel.length + 3) * 5.5);
+   279→   279→    return <><line x1={margin.left} y1={y} x2={width - margin.right} y2={y} stroke={color} strokeWidth={1.2} strokeDasharray="6 3" opacity={opacity} /><rect x={width - margin.right + 2} y={y - 8} width={labelW} height={16} rx={3} fill={color} opacity={opacity} /><text x={width - margin.right + 2 + labelW/2} y={y + 3} fontSize={7} fill="white" fontWeight="bold" textAnchor="middle" opacity={opacity}>{label} ${priceLabel}</text></>;
+   280→   280→  };
+   281→   281→
+   282→   282→  return (
+   283→   283→    <svg width="100%" viewBox={`0 0 ${width} ${height}`} className="w-full" preserveAspectRatio="xMidYMid meet">
+   284→   284→      {ticks.map((t, i) => (<g key={i}><line x1={margin.left} y1={yScale(t)} x2={width - margin.right} y2={yScale(t)} stroke="hsl(var(--border))" strokeWidth={0.5} opacity={0.3} /><text x={width - margin.right + 5} y={yScale(t) + 4} fontSize={9} fill="hsl(var(--muted-foreground))" textAnchor="start">{formatY(t)}</text></g>))}
+   285→   285→      {data.filter((_, i) => i % Math.max(1, Math.floor(data.length / 8)) === 0).map((d, i) => { const idx = data.indexOf(d); return <text key={i} x={xScale(idx)} y={height - 5} fontSize={8} fill="hsl(var(--muted-foreground))" textAnchor="middle">{d.time || d.date.slice(0, 5)}</text>; })}
+   286→   286→      {/* Signal zones */}
+   287→   287→      {ts && ts.direction !== 'FLAT' && <><rect x={margin.left} y={yScale(Math.max(ts.entry, ts.takeProfit2))} width={chartW} height={Math.abs(yScale(ts.entry) - yScale(ts.takeProfit2))} fill={ts.direction === 'LONG' ? '#10b981' : '#ef4444'} opacity={0.04} /><rect x={margin.left} y={yScale(Math.max(ts.entry, ts.stopLoss))} width={chartW} height={Math.abs(yScale(ts.entry) - yScale(ts.stopLoss))} fill="#ef4444" opacity={0.06} /></>}
+   288→   288→      {/* Candles */}
+   289→   289→      {data.map((d, i) => { const isGreen = d.close >= d.open; const color = isGreen ? '#10b981' : '#ef4444'; const bodyTop = yScale(Math.max(d.open, d.close)); const bodyBottom = yScale(Math.min(d.open, d.close)); const cx = xScale(i); return <g key={i}><line x1={cx} y1={yScale(d.high)} x2={cx} y2={yScale(d.low)} stroke={color} strokeWidth={1} /><rect x={cx - candleW / 2} y={bodyTop} width={candleW} height={Math.max(1, bodyBottom - bodyTop)} fill={color} stroke={color} strokeWidth={0.5} opacity={0.9} rx={1} /></g>; })}
+   290→   290→      {/* EMA overlays */}
+   291→   291→      {overlayIndicators && ema9Data.length > 1 && <path d={linePath(ema9Data)} fill="none" stroke="#f97316" strokeWidth={1.5} strokeDasharray="4 2" />}
+   292→   292→      {overlayIndicators && ema21Data.length > 1 && <path d={linePath(ema21Data)} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="4 2" />}
+   293→   293→      {/* Current price line */}
+   294→   294→      {data.length > 0 && <><line x1={margin.left} y1={yScale(data[data.length - 1].close)} x2={width - margin.right} y2={yScale(data[data.length - 1].close)} stroke="#10b981" strokeWidth={0.5} strokeDasharray="3 3" opacity={0.5} /><text x={width - margin.right + 5} y={yScale(data[data.length - 1].close) + 4} fontSize={9} fill="#10b981" fontWeight="bold">{formatY(data[data.length - 1].close)}</text></>}
+   295→   295→      {/* Trade signal levels */}
+   296→   296→      {ts && ts.direction !== 'FLAT' && <><LevelLine price={ts.entry} color="#3b82f6" label={ts.entryType === 'LIMIT' ? 'LIMIT' : 'ENTRY'} /><LevelLine price={ts.stopLoss} color="#ef4444" label="STOP" /><LevelLine price={ts.takeProfit1} color="#10b981" label="TP1" opacity={0.7} /><LevelLine price={ts.takeProfit2} color="#10b981" label="TP2" />
+   297→   297→        <rect x={margin.left + 8} y={margin.top + 2} width={240} height={92} rx={6} fill="hsl(var(--card))" stroke="hsl(var(--border))" strokeWidth={1} opacity={0.95} />
+   298→   298→        <text x={margin.left + 16} y={margin.top + 18} fontSize={13} fill={ts.direction === 'LONG' ? '#10b981' : '#ef4444'} fontWeight="bold">{ts.direction === 'LONG' ? '▲ LONG' : '▼ SHORT'} — {ts.confidence}%</text>
+   299→   299→        <text x={margin.left + 16} y={margin.top + 35} fontSize={9} fill="hsl(var(--muted-foreground))">Вход: <tspan fill="#3b82f6" fontWeight="bold">${formatPrice(ts.entry)}</tspan> | Стоп: <tspan fill="#ef4444" fontWeight="bold">${formatPrice(ts.stopLoss)}</tspan></text>
+   300→   300→        <text x={margin.left + 16} y={margin.top + 49} fontSize={9} fill="hsl(var(--muted-foreground))">TP1: <tspan fill="#22c55e" fontWeight="bold">${formatPrice(ts.takeProfit1)}</tspan> | TP2: <tspan fill="#10b981" fontWeight="bold">${formatPrice(ts.takeProfit2)}</tspan> | R:R <tspan fill={ts.riskReward >= 2 ? '#10b981' : '#eab308'} fontWeight="bold">{ts.riskReward.toFixed(2)}</tspan></text>
+   301→   301→        <text x={margin.left + 16} y={margin.top + 63} fontSize={9} fill="hsl(var(--muted-foreground))">{ts.holdDuration} | {ts.momentum} | {ts.trend}</text>
+   302→   302→        <text x={margin.left + 16} y={margin.top + 77} fontSize={8} fill="hsl(var(--muted-foreground))">Подд: <tspan fill="#10b981">${formatPrice(ts.support)}</tspan> | Сопр: <tspan fill="#ef4444">${formatPrice(ts.resistance)}</tspan></text>
+   303→   303→        {ts.candlePattern && <text x={margin.left + 16} y={margin.top + 89} fontSize={8} fill="#f59e0b">Паттерн: {ts.candlePattern}</text>}
+   304→   304→      </>}
+   305→   305→      {/* Position tool levels */}
+   306→   306→      {hasPosition && <><LevelLine price={pt!.entryPrice} color="#3b82f6" label="ENTRY" /><LevelLine price={pt!.targetPrice} color="#10b981" label="TGT" /><LevelLine price={pt!.stopLoss} color="#ef4444" label="STOP" />
+   307→   307→        <rect x={margin.left + 255} y={margin.top + 2} width={180} height={55} rx={6} fill="hsl(var(--card))" stroke="hsl(var(--border))" strokeWidth={1} opacity={0.95} />
+   308→   308→        <text x={margin.left + 263} y={margin.top + 18} fontSize={11} fill={pt!.direction === 'LONG' ? '#10b981' : '#ef4444'} fontWeight="bold">{pt!.direction === 'LONG' ? '▲ LONG' : '▼ SHORT'} — {pt!.leverage}x</text>
+   309→   309→        <text x={margin.left + 263} y={margin.top + 33} fontSize={9} fill="hsl(var(--muted-foreground))">Профит: <tspan fill={targetPnl >= 0 ? '#10b981' : '#ef4444'} fontWeight="bold">{targetPnl >= 0 ? '+' : ''}{formatPrice(targetPnl)}$</tspan></text>
+   310→   310→        <text x={margin.left + 263} y={margin.top + 46} fontSize={9} fill="hsl(var(--muted-foreground))">R:R <tspan fill={rr >= 2 ? '#10b981' : '#eab308'} fontWeight="bold">{rr.toFixed(2)}</tspan> | Итого: <tspan fontWeight="bold" fill={targetPnl >= 0 ? '#10b981' : '#ef4444'}>{formatPrice(pt!.amount + targetPnl)}$</tspan></text>
+   311→   311→      </>}
+   312→   312→    </svg>
+   313→   313→  );
+   314→   314→}
+   315→   315→
+   316→   316→function MiniLineChart({ data, color, yMin, yMax, refLines }: { data: number[]; color: string; yMin: number; yMax: number; refLines?: number[]; }) {
+   317→   317→  if (data.length < 2) return <div className="h-[110px] flex items-center justify-center text-muted-foreground text-xs">—</div>;
+   318→   318→  const w = 500, h = 110, margin = { top: 5, right: 35, bottom: 5, left: 5 };
+   319→   319→  const cw = w - margin.left - margin.right, ch = h - margin.top - margin.bottom;
+   320→   320→  const range = yMax - yMin || 1;
+   321→   321→  const yS = (v: number) => margin.top + ch - ((v - yMin) / range) * ch;
+   322→   322→  const xS = (i: number) => margin.left + (i / (data.length - 1)) * cw;
+   323→   323→  return (
+   324→   324→    <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="w-full" preserveAspectRatio="xMidYMid meet">
+   325→   325→      {refLines?.map((v, i) => <g key={i}><line x1={margin.left} y1={yS(v)} x2={margin.left + cw} y2={yS(v)} stroke={v > 50 ? '#ef4444' : '#10b981'} strokeWidth={0.5} strokeDasharray="3 3" opacity={0.5} /><text x={margin.left + cw + 3} y={yS(v) + 3} fontSize={7} fill={v > 50 ? '#ef4444' : '#10b981'}>{v}</text></g>)}
+   326→   326→      <path d={data.map((v, i) => `${i === 0 ? 'M' : 'L'}${xS(i)},${yS(v)}`).join(' ')} fill="none" stroke={color} strokeWidth={1.5} />
+   327→   327→      {data.length > 0 && <text x={margin.left + cw + 3} y={yS(data[data.length - 1]) + 3} fontSize={8} fill={color} fontWeight="bold">{data[data.length - 1].toFixed(1)}</text>}
+   328→   328→    </svg>
+   329→   329→  );
+   330→   330→}
+   331→   331→
+   332→   332→function MiniMACDChart({ data }: { data: ChartDataPoint[] }) {
+   333→   333→  const hist = data.map(d => d.macdHist).filter(v => v != null) as number[];
+   334→   334→  const macd = data.map(d => d.macd).filter(v => v != null) as number[];
+   335→   335→  const sig = data.map(d => d.macdSignal).filter(v => v != null) as number[];
+   336→   336→  if (hist.length < 2) return <div className="h-[110px] flex items-center justify-center text-muted-foreground text-xs">—</div>;
+   337→   337→  const w = 500, h = 110, margin = { top: 5, right: 40, bottom: 5, left: 5 };
+   338→   338→  const cw = w - margin.left - margin.right, ch = h - margin.top - margin.bottom;
+   339→   339→  const all = [...macd, ...sig, ...hist], maxAbs = Math.max(Math.abs(Math.min(...all)), Math.abs(Math.max(...all))) || 1, yR = maxAbs * 1.2;
+   340→   340→  const yS = (v: number) => margin.top + ch / 2 - (v / yR) * (ch / 2);
+   341→   341→  const xS = (i: number, t: number) => margin.left + (i / (t - 1)) * cw;
+   342→   342→  const bw = Math.max(1, (cw / hist.length) * 0.6);
+   343→   343→  return (
+   344→   344→    <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="w-full" preserveAspectRatio="xMidYMid meet">
+   345→   345→      <line x1={margin.left} y1={yS(0)} x2={margin.left + cw} y2={yS(0)} stroke="hsl(var(--muted-foreground))" strokeWidth={0.5} opacity={0.3} />
+   346→   346→      {hist.map((v, i) => <rect key={i} x={xS(i, hist.length) - bw / 2} y={v >= 0 ? yS(v) : yS(0)} width={bw} height={Math.abs(yS(v) - yS(0))} fill={v >= 0 ? '#10b981' : '#ef4444'} opacity={0.4} />)}
+   347→   347→      {macd.length > 1 && <path d={macd.map((v, i) => `${i === 0 ? 'M' : 'L'}${xS(i, macd.length)},${yS(v)}`).join(' ')} fill="none" stroke="#3b82f6" strokeWidth={1.2} />}
+   348→   348→      {sig.length > 1 && <path d={sig.map((v, i) => `${i === 0 ? 'M' : 'L'}${xS(i, sig.length)},${yS(v)}`).join(' ')} fill="none" stroke="#ef4444" strokeWidth={1.2} />}
+   349→   349→    </svg>
+   350→   350→  );
+   351→   351→}
+   352→   352→
+   353→   353→// Deposit mini chart
+   354→   354→function DepositChart({ data, initialDeposit, totalDebt }: { data: DepositSnapshot[]; initialDeposit: number; totalDebt?: number }) {
+   355→   355→  if (data.length < 2) return null;
+   356→   356→  const w = 560, h = 100, margin = { top: 10, right: 50, bottom: 10, left: 10 };
+   357→   357→  const cw = w - margin.left - margin.right, ch = h - margin.top - margin.bottom;
+   358→   358→  // Use equity (includes locked positions + unrealized PnL)
+   359→   359→  const balances = data.map(d => d.equity);
+   360→   360→  // Reference: effective capital = initialDeposit + totalDebt (what was actually available)
+   361→   361→  const effectiveCapital = initialDeposit + (totalDebt || 0);
+   362→   362→  const minB = Math.min(...balances, effectiveCapital) * 0.95;
+   363→   363→  const maxB = Math.max(...balances, effectiveCapital) * 1.05;
+   364→   364→  const range = maxB - minB || 1;
+   365→   365→  const xS = (i: number) => margin.left + (i / (data.length - 1)) * cw;
+   366→   366→  const yS = (v: number) => margin.top + ch - ((v - minB) / range) * ch;
+   367→   367→  // Profit = equity above effective capital
+   368→   368→  const lastVal = data[data.length - 1].equity;
+   369→   369→  const isProfit = lastVal >= effectiveCapital;
+   370→   370→  const lineColor = isProfit ? '#10b981' : '#ef4444';
+   371→   371→  const areaPath = data.map((d, i) => `${i === 0 ? 'M' : 'L'}${xS(i)},${yS(d.equity)}`).join(' ') + ` L${xS(data.length - 1)},${margin.top + ch} L${margin.left},${margin.top + ch} Z`;
+   372→   372→  const linePath = data.map((d, i) => `${i === 0 ? 'M' : 'L'}${xS(i)},${yS(d.equity)}`).join(' ');
+   373→   373→  // PnL relative to own capital only (not debt)
+   374→   374→  const ownEquity = lastVal - (totalDebt || 0);
+   375→   375→  const pnlPct = ((ownEquity / initialDeposit - 1) * 100).toFixed(1);
+   376→   376→  return (
+   377→   377→    <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="w-full" preserveAspectRatio="xMidYMid meet">
+   378→   378→      {/* Effective capital reference line */}
+   379→   379→      <line x1={margin.left} y1={yS(effectiveCapital)} x2={margin.left + cw} y2={yS(effectiveCapital)} stroke="hsl(var(--muted-foreground))" strokeWidth={0.5} strokeDasharray="4 2" opacity={0.5} />
+   380→   380→      <text x={margin.left + cw + 3} y={yS(effectiveCapital) + 3} fontSize={7} fill="hsl(var(--muted-foreground))">${effectiveCapital.toFixed(0)}</text>
+   381→   381→      {/* Area */}
+   382→   382→      <path d={areaPath} fill={lineColor} opacity={0.08} />
+   383→   383→      {/* Line */}
+   384→   384→      <path d={linePath} fill="none" stroke={lineColor} strokeWidth={2} />
+   385→   385→      {/* Last value */}
+   386→   386→      <text x={margin.left + cw + 3} y={yS(lastVal) + 3} fontSize={9} fill={lineColor} fontWeight="bold">${lastVal.toFixed(2)}</text>
+   387→   387→      <text x={margin.left + 5} y={margin.top + 12} fontSize={8} fill={isProfit ? '#10b981' : '#ef4444'} fontWeight="bold">
+   388→   388→        {parseFloat(pnlPct) >= 0 ? '+' : ''}{pnlPct}% PnL
+   389→   389→      </text>
+   390→   390→    </svg>
+   391→   391→  );
+   392→   392→}
+   393→   393→
+   394→   394→// ============================================
+   395→   395→// TRADE TERMINAL MODAL — Full-screen trade view
+   396→   396→// ============================================
+   397→   397→function TradeTerminalModal({ trade, coins, onClose }: { trade: Trade; coins: CoinData[]; onClose: () => void }) {
+   398→   398→  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
+   399→   399→  const [loading, setLoading] = useState(true);
+   400→   400→  const [currentPrice, setCurrentPrice] = useState<number>(0);
+   401→   401→  const coinData = coins.find(c => c.id === trade.coinId);
+   402→   402→  const symbol = trade.coinSymbol;
+   403→   403→
+   404→   404→  useEffect(() => {
+   405→   405→    let mounted = true;
+   406→   406→    const fetchChart = async () => {
+   407→   407→      setLoading(true);
+   408→   408→      try {
+   409→   409→        const res = await fetch(`/api/crypto/signals?coin=${trade.coinId}&interval=${trade.timeframe || '1h'}`);
+   410→   410→        if (res.ok && mounted) {
+   411→   411→          const json = await res.json();
+   412→   412→          setChartData(json.chartData || []);
+   413→   413→        }
+   414→   414→      } catch {} finally {
+   415→   415→        if (mounted) setLoading(false);
+   416→   416→      }
+   417→   417→    };
+   418→   418→    fetchChart();
+   419→   419→    const iv = setInterval(fetchChart, 45000);
+   420→   420→    return () => { mounted = false; clearInterval(iv); };
+   421→   421→  }, [trade.coinId, trade.timeframe]);
+   422→   422→
+   423→   423→  useEffect(() => {
+   424→   424→    if (coinData?.current_price) {
+   425→   425→      setCurrentPrice(coinData.current_price);
+   426→   426→    } else if (chartData.length > 0) {
+   427→   427→      setCurrentPrice(chartData[chartData.length - 1].close);
+   428→   428→    }
+   429→   429→  }, [coinData, chartData]);
+   430→   430→
+   431→   431→  const unrealizedPnL = !trade.resolved && trade.entryReached && currentPrice > 0
+   432→   432→    ? (trade.direction === 'LONG'
+   433→   433→        ? (currentPrice - trade.entry) * trade.quantity * trade.leverage
+   434→   434→        : (trade.entry - currentPrice) * trade.quantity * trade.leverage)
+   435→   435→    : null;
+   436→   436→  const unrealizedPct = unrealizedPnL !== null && trade.positionSize > 0
+   437→   437→    ? (unrealizedPnL / trade.positionSize) * 100 : null;
+   438→   438→  const distToEntry = !trade.entryReached && currentPrice > 0 && trade.entry > 0
+   439→   439→    ? ((trade.entry - currentPrice) / currentPrice) * 100 : null;
+   440→   440→
+   441→   441→  const fmtDate = (ts: number) => new Date(ts).toLocaleString('ru-RU', {
+   442→   442→    day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit'
+   443→   443→  });
+   444→   444→  const fmtTime = (ts: number) => new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+   445→   445→
+   446→   446→  const tradeDuration = trade.closedAt
+   447→   447→    ? Math.round((trade.closedAt - (trade.enteredAt || trade.timestamp)) / 60000)
+   448→   448→    : trade.entryReached
+   449→   449→    ? Math.round((Date.now() - (trade.enteredAt || trade.timestamp)) / 60000)
+   450→   450→    : null;
+   451→   451→
+   452→   452→  const tradeSignalForChart: TradeSignal | null = {
+   453→   453→    direction: trade.direction, confidence: trade.confidence, entry: trade.entry,
+   454→   454→    entryType: trade.entryType, entryReason: trade.entryReason, stopLoss: trade.stopLoss,
+   455→   455→    takeProfit1: trade.takeProfit1, takeProfit2: trade.takeProfit2, takeProfit3: trade.takeProfit3,
+   456→   456→    riskReward: trade.entry > 0 && trade.stopLoss > 0 ? Math.abs(trade.takeProfit1 - trade.entry) / Math.abs(trade.entry - trade.stopLoss) : 0,
+   457→   457→    holdDuration: '', holdDurationHours: 0, reasons: trade.reasons, warnings: [],
+   458→   458→    indicators: [], multiTimeframe: { consensus: 'NEUTRAL', alignment: 0 },
+   459→   459→    currentPrice: currentPrice || trade.currentPrice, atr: 0, support: 0, resistance: 0,
+   460→   460→    trend: 'BULLISH', momentum: 'MODERATE', candlePattern: null, volumeSignal: null,
+   461→   461→  };
+   462→   462→
+   463→   463→  return (
+   464→   464→    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" onClick={onClose}>
+   465→   465→      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+   466→   466→      <div className="relative w-[95vw] h-[90vh] bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl overflow-hidden flex" onClick={e => e.stopPropagation()}>
+   467→   467→
+   468→   468→        {/* Close button — always visible */}
+   469→   469→        <button onClick={onClose} className="absolute top-3 right-3 z-20 w-9 h-9 flex items-center justify-center rounded-full bg-black/60 hover:bg-black/80 text-white transition-colors" title="Закрыть">
+   470→   470→          <X className="w-5 h-5" />
+   471→   471→        </button>
+   472→   472→
+   473→   473→        {/* LEFT: Chart — takes all remaining space */}
+   474→   474→        <div className="flex-1 flex flex-col min-w-0">
+   475→   475→          {/* Top bar */}
+   476→   476→          <div className={`flex items-center justify-between px-6 py-3 border-b border-zinc-200 dark:border-zinc-700 ${
+   477→   477→            trade.direction === 'LONG' ? 'bg-gradient-to-r from-emerald-500/10 to-transparent' : 'bg-gradient-to-r from-red-500/10 to-transparent'
+   478→   478→          }`}>
+   479→   479→            <div className="flex items-center gap-4">
+   480→   480→              <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg font-black ${
+   481→   481→                trade.direction === 'LONG' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-red-500/20 text-red-500'
+   482→   482→              }`}>
+   483→   483→                {trade.direction === 'LONG' ? '▲' : '▼'}
+   484→   484→              </div>
+   485→   485→              <div>
+   486→   486→                <div className="flex items-center gap-2">
+   487→   487→                  <span className={`text-xl font-black ${trade.direction === 'LONG' ? 'text-emerald-500' : 'text-red-500'}`}>
+   488→   488→                    {trade.direction === 'LONG' ? 'ЛОНГ' : 'ШОРТ'}
+   489→   489→                  </span>
+   490→   490→                  <span className="text-lg font-bold text-foreground">{symbol}/USDT</span>
+   491→   491→                  <Badge variant="outline" className="text-[10px]">{trade.timeframe}</Badge>
+   492→   492→                  {!trade.resolved && <Badge className="text-[10px] bg-blue-500 text-white">АКТИВЕН</Badge>}
+   493→   493→                  {trade.resolved && trade.result === 'WIN' && <Badge className="text-[10px] bg-emerald-500 text-white">+ПРИБЫЛЬ</Badge>}
+   494→   494→                  {trade.resolved && trade.result === 'LOSS' && <Badge className="text-[10px] bg-red-500 text-white">-УБЫТОК</Badge>}
+   495→   495→                  {trade.resolved && trade.result === 'EXPIRED' && <Badge className="text-[10px] bg-yellow-500 text-white">ИСТЁК</Badge>}
+   496→   496→                </div>
+   497→   497→                <div className="text-[11px] text-muted-foreground mt-0.5">
+   498→   498→                  {fmtDate(trade.timestamp)}
+   499→   499→                  {trade.enteredAt && trade.enteredAt !== trade.timestamp && <> · Вход: {fmtTime(trade.enteredAt)}</>}
+   500→   500→                  {trade.closedAt && <> · Выход: {fmtTime(trade.closedAt)}</>}
+
+[showing lines 1-500 of 2002; use offset=501 with limit to continue reading]

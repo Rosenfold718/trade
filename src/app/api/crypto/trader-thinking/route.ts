@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { rateLimit } from '@/lib/rate-limit';
+import { RATE_LIMITS } from '@/lib/api-rate-limits';
 import { readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
@@ -65,10 +67,17 @@ async function saveThinking(session: ThinkingSession) {
 }
 
 // GET: Retrieve trader's thinking log
-export async function GET() {
+export async function GET(request: Request) {
+  const clientIp = request.headers.get('x-forwarded-for') || 'unknown';
+  const { allowed, remaining, resetAt } = rateLimit(`api:thinking:${clientIp}`, RATE_LIMITS.thinking);
+  if (!allowed) {
+    const retryAfter = Math.ceil((resetAt - Date.now()) / 1000);
+    return NextResponse.json({ error: 'Rate limit exceeded', retryAfter }, { status: 429, headers: { 'Retry-After': String(retryAfter) } });
+  }
+
   try {
     const session = await loadThinking();
-    return NextResponse.json(session);
+    return NextResponse.json(session, { headers: { 'X-RateLimit-Remaining': String(remaining) } });
   } catch (error) {
     return NextResponse.json({ error: 'Failed to load thinking' }, { status: 500 });
   }

@@ -1,0 +1,1258 @@
+     1→import { NextResponse } from 'next/server';
+     2→import { rateLimit } from '@/lib/rate-limit';
+     3→import { RATE_LIMITS } from '@/lib/api-rate-limits';
+     4→import { readFile, writeFile } from 'fs/promises';
+     5→import { existsSync } from 'fs';
+     6→import path from 'path';
+     7→import {
+     8→  calculateRealisticPnL,
+     9→  updateTrailingStop,
+    10→  checkPartialExits,
+    11→  kellyCriterion,
+    12→  checkPortfolioRisk,
+    13→  type PartialExit as EnginePartialExit,
+    14→} from '@/lib/trading-engine';
+    15→import {
+    16→  auditTradeOpened,
+    17→  auditTradeClosed,
+    18→  auditTradeCancelled,
+    19→  auditDrawdownWarning,
+    20→} from '@/lib/audit';
+    21→
+    22→const DATA_PATH = path.join(process.cwd(), 'trader-data.json');
+    23→const THINKING_PATH = path.join(process.cwd(), 'trader-thinking.json');
+    24→
+    25→// ============================================
+    26→// TYPES
+    27→// ============================================
+    28→
+    29→interface Trade {
+    30→  id: string;
+    31→  coinId: string;
+    32→  coinSymbol: string;
+    33→  direction: 'LONG' | 'SHORT';
+    34→  entryType: 'LIMIT' | 'MARKET';
+    35→  entry: number;
+    36→  currentPrice: number;
+    37→  stopLoss: number;
+    38→  takeProfit1: number;
+    39→  takeProfit2: number;
+    40→  takeProfit3: number;
+    41→  confidence: number;
+    42→  timeframe: string;
+    43→  entryReason: string;
+    44→  reasons: string[];
+    45→  leverage: number;
+    46→  positionSize: number;
+    47→  quantity: number;
+    48→  timestamp: number;
+    49→  entryReached: boolean;
+    50→  enteredAt: number | null;
+    51→  resolved: boolean;
+    52→  result: 'WIN' | 'LOSS' | 'EXPIRED' | null;
+    53→  exitPrice: number | null;
+    54→  exitReason: string | null;
+    55→  closedAt: number | null;
+    56→  pnlUSDT: number | null;
+    57→  pnlPct: number | null;
+    58→  pointsChange: number | null;
+    59→  // Advanced trading engine fields (optional — disabled by default)
+    60→  trailingStop?: boolean;
+    61→  trailingStepPct?: number;
+    62→  highestPrice?: number;
+    63→  lowestPrice?: number;
+    64→  partialExits?: string;       // JSON string of EnginePartialExit[]
+    65→  remainingQuantity?: number;  // remaining after partial exits
+    66→}
+    67→
+    68→interface DebtEntry {
+    69→  timestamp: number;
+    70→  amount: number;
+    71→  remainingOwed: number;
+    72→  label: string;
+    73→}
+    74→
+    75→interface DepositSnapshot {
+    76→  timestamp: number;
+    77→  balance: number;
+    78→  equity: number;
+    79→}
+    80→
+    81→// ============================================
+    82→// ADAPTIVE LEARNING — Lessons from mistakes
+    83→// ============================================
+    84→
+    85→interface Lesson {
+    86→  type: string;           // e.g. 'sl_too_close', 'bad_coin', 'low_confidence', 'counter_trend', 'limit_expired'
+    87→  description: string;    // Human-readable explanation
+    88→  coinId?: string;        // Specific coin if applicable
+    89→  direction?: 'LONG' | 'SHORT';
+    90→  value?: number;         // Numeric value (e.g. SL distance %)
+    91→  timestamp: number;
+    92→  tradeId: string;
+    93→  severity: 'low' | 'medium' | 'high'; // How important this lesson is
+    94→}
+    95→
+    96→interface AdaptiveParams {
+    97→  minSlDistancePct: number;    // Minimum SL distance as % of entry (learned from SL-too-close mistakes)
+    98→  minConfidence: number;       // Minimum confidence to open a trade (learned from low-confidence losses)
+    99→  avoidCoins: string[];        // Coins to avoid (stablecoins, consistently losing)
+   100→  minRr: number;              // Minimum risk/reward ratio (learned from bad R:R trades)
+   101→  counterTrendPenalty: number; // How much to penalize counter-trend trades (0-1, learned)
+   102→  limitExpiryHours: number;   // How long to wait for LIMIT entry before it expires
+   103→  marketEntryConditions: string[]; // When MARKET entry is preferred over LIMIT
+   104→  lessons: Lesson[];          // All learned lessons
+   105→  lessonsVersion: number;     // Incremented when new lessons are added
+   106→}
+   107→
+   108→const DEFAULT_ADAPTIVE: AdaptiveParams = {
+   109→  minSlDistancePct: 1.0,     // Start at 1.0% — 0.5% is noise for crypto, SL gets hit by normal volatility
+   110→  minConfidence: 60,          // Start at 60% — avoid low-confidence noise
+   111→  avoidCoins: ['tether', 'usd-coin', 'dai', 'binance-usd', 'staked-ether', 'wrapped-bitcoin', 'usds'], // Stablecoins — no volatility = no intraday profit
+   112→  minRr: 1.5,
+   113→  counterTrendPenalty: 0.1,
+   114→  limitExpiryHours: 2,       // 2h for LIMIT — don't lock capital for too long
+   115→  marketEntryConditions: ['strong_momentum', 'breakout', 'high_confidence'],
+   116→  lessons: [],
+   117→  lessonsVersion: 0,
+   118→};
+   119→
+   120→// ============================================
+   121→// INTRADAY TIME CONSTANTS
+   122→// ============================================
+   123→
+   124→const MAX_TRADE_AGE = 4 * 60 * 60 * 1000;   // 4h — intraday trades must resolve within this
+   125→const STALE_TRADE_AGE = 3 * 60 * 60 * 1000;  // 3h — close stale positions at market price
+   126→const LIMIT_EXPIRY_AGE = 2 * 60 * 60 * 1000; // 2h — LIMIT orders that didn't trigger
+   127→const MAX_POSITION_AGE = 24 * 60 * 60 * 1000; // 24h — absolute maximum (safety net)
+   128→const MAX_MARGIN_PCT = 0.08;                   // 8% of free balance as margin per trade (allows up to 5 concurrent positions)
+   129→
+   130→interface TraderData {
+   131→  initialDeposit: number;
+   132→  balance: number;
+   133→  totalTrades: number;
+   134→  wins: number;
+   135→  losses: number;
+   136→  expired: number;
+   137→  score: number;
+   138→  winRate: number;
+   139→  avgPnl: number;
+   140→  streak: number;
+   141→  bestTrade: number;
+   142→  worstTrade: number;
+   143→  totalPnl: number;
+   144→  level: string;
+   145→  levelEmoji: string;
+   146→  riskPerTrade: number;
+   147→  defaultLeverage: number;
+   148→  trades: Trade[];
+   149→  depositHistory: DepositSnapshot[];
+   150→  lastUpdated: number;
+   151→  totalDebt: number;
+   152→  debtHistory: DebtEntry[];
+   153→  totalRepaid: number;
+   154→  // Adaptive learning
+   155→  adaptive: AdaptiveParams;
+   156→}
+   157→
+   158→// ============================================
+   159→// HELPERS
+   160→// ============================================
+   161→
+   162→function getLevel(score: number): { level: string; emoji: string } {
+   163→  if (score >= 500) return { level: 'Легенда', emoji: '👑' };
+   164→  if (score >= 300) return { level: 'Мастер', emoji: '🏆' };
+   165→  if (score >= 150) return { level: 'Профессионал', emoji: '⭐' };
+   166→  if (score >= 50)  return { level: 'Трейдер', emoji: '📊' };
+   167→  return { level: 'Новичок', emoji: '🌱' };
+   168→}
+   169→
+   170→async function loadData(): Promise<TraderData> {
+   171→  const defaultData: TraderData = {
+   172→    initialDeposit: 100,
+   173→    balance: 100,
+   174→    totalTrades: 0, wins: 0, losses: 0, expired: 0,
+   175→    score: 0, winRate: 0, avgPnl: 0, streak: 0,
+   176→    bestTrade: 0, worstTrade: 0, totalPnl: 0,
+   177→    level: 'Новичок', levelEmoji: '🌱',
+   178→    riskPerTrade: 5, defaultLeverage: 3,
+   179→    trades: [],
+   180→    depositHistory: [{ timestamp: Date.now(), balance: 100, equity: 100 }],
+   181→    lastUpdated: Date.now(),
+   182→    totalDebt: 0, debtHistory: [], totalRepaid: 0,
+   183→    adaptive: { ...DEFAULT_ADAPTIVE, lessons: [] },
+   184→  };
+   185→  try {
+   186→    if (existsSync(DATA_PATH)) {
+   187→      const raw = await readFile(DATA_PATH, 'utf-8');
+   188→      const parsed = JSON.parse(raw);
+   189→      return {
+   190→        ...defaultData, ...parsed,
+   191→        depositHistory: parsed.depositHistory || defaultData.depositHistory,
+   192→        debtHistory: parsed.debtHistory || [],
+   193→        totalDebt: parsed.totalDebt || 0,
+   194→        totalRepaid: parsed.totalRepaid || 0,
+   195→        adaptive: { ...DEFAULT_ADAPTIVE, ...(parsed.adaptive || {}), lessons: parsed.adaptive?.lessons || [] },
+   196→      };
+   197→    }
+   198→  } catch {}
+   199→  return defaultData;
+   200→}
+   201→
+   202→async function saveData(data: TraderData) {
+   203→  try {
+   204→    await writeFile(DATA_PATH, JSON.stringify(data, null, 2), 'utf-8');
+   205→  } catch (e) {
+   206→    console.error('Failed to save trader data:', e);
+   207→  }
+   208→}
+   209→
+   210→// Record a thought to the trader's thinking log (called on trade close/expire)
+   211→async function recordThought(thought: {
+   212→  type: string; title: string; detail: string;
+   213→  coinSymbol?: string; coinId?: string; direction?: 'LONG' | 'SHORT';
+   214→  confidence?: number; tradeId?: string; pnl?: number;
+   215→  entryType?: 'LIMIT' | 'MARKET';
+   216→  emotion?: string; tags?: string[];
+   217→}) {
+   218→  try {
+   219→    let session: any = { thoughts: [] };
+   220→    if (existsSync(THINKING_PATH)) {
+   221→      const raw = await readFile(THINKING_PATH, 'utf-8');
+   222→      session = JSON.parse(raw);
+   223→    }
+   224→    session.thoughts = session.thoughts || [];
+   225→    session.thoughts.unshift({
+   226→      id: `thought_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+   227→      timestamp: Date.now(),
+   228→      ...thought,
+   229→      emotion: thought.emotion || 'neutral',
+   230→      tags: thought.tags || [],
+   231→    });
+   232→    session.thoughts = session.thoughts.slice(0, 200);
+   233→    await writeFile(THINKING_PATH, JSON.stringify(session, null, 2), 'utf-8');
+   234→  } catch (e) {
+   235→    console.error('Failed to record thought:', e);
+   236→  }
+   237→}
+   238→
+   239→function calculatePositionSize(
+   240→  freeBalance: number, riskPct: number, entry: number, stopLoss: number, leverage: number
+   241→): { positionSize: number; quantity: number } {
+   242→  // Money management: risk only riskPct% of FREE balance per trade
+   243→  const riskAmount = freeBalance * (riskPct / 100);
+   244→  const stopDistance = Math.abs(entry - stopLoss);
+   245→  if (stopDistance === 0 || entry === 0) return { positionSize: 0, quantity: 0 };
+   246→  const stopPct = stopDistance / entry;
+   247→  const rawPositionSize = riskAmount / stopPct;
+   248→  // Cap: max 12% of free balance as margin (before leverage) — leaves room for multiple trades
+   249→  const maxMargin = freeBalance * MAX_MARGIN_PCT;
+   250→  const maxPositionSize = maxMargin * leverage;
+   251→  const positionSize = Math.min(rawPositionSize, maxPositionSize, freeBalance * leverage);
+   252→  const quantity = positionSize / entry;
+   253→  return { positionSize: Math.round(positionSize * 100) / 100, quantity: Math.round(quantity * 1000000) / 1000000 };
+   254→}
+   255→
+   256→// ============================================
+   257→// ADAPTIVE LEARNING — Analyze mistakes from a resolved trade
+   258→// ============================================
+   259→
+   260→function analyzeTradeMistakes(trade: Trade, adaptive: AdaptiveParams): Lesson[] {
+   261→  const newLessons: Lesson[] = [];
+   262→  if (!trade.resolved || trade.result !== 'LOSS') return newLessons;
+   263→
+   264→  const slDistancePct = (Math.abs(trade.entry - trade.stopLoss) / trade.entry) * 100;
+   265→
+   266→  // Lesson 1: Stop-loss too close
+   267→  if (slDistancePct < adaptive.minSlDistancePct) {
+   268→    const severity: 'low' | 'medium' | 'high' = slDistancePct < adaptive.minSlDistancePct * 0.3 ? 'high' : slDistancePct < adaptive.minSlDistancePct * 0.6 ? 'medium' : 'low';
+   269→    newLessons.push({
+   270→      type: 'sl_too_close',
+   271→      description: `SL слишком близко (${slDistancePct.toFixed(2)}% от входа) — рыночный шум выбил позицию. Минимум ${adaptive.minSlDistancePct.toFixed(1)}%`,
+   272→      coinId: trade.coinId,
+   273→      direction: trade.direction,
+   274→      value: slDistancePct,
+   275→      timestamp: Date.now(),
+   276→      tradeId: trade.id,
+   277→      severity,
+   278→    });
+   279→  }
+   280→
+   281→  // Lesson 2: Low confidence trade lost
+   282→  if (trade.confidence < 60) {
+   283→    newLessons.push({
+   284→      type: 'low_confidence',
+   285→      description: `Низкая уверенность (${trade.confidence}%) — сделка убыточна. Минимум ${adaptive.minConfidence}%`,
+   286→      coinId: trade.coinId,
+   287→      direction: trade.direction,
+   288→      value: trade.confidence,
+   289→      timestamp: Date.now(),
+   290→      tradeId: trade.id,
+   291→      severity: trade.confidence < 50 ? 'high' : 'medium',
+   292→    });
+   293→  }
+   294→
+   295→  // Lesson 3: Bad R:R ratio
+   296→  const rr = Math.abs(trade.takeProfit1 - trade.entry) / Math.abs(trade.entry - trade.stopLoss);
+   297→  if (rr < 1.5 && trade.result === 'LOSS') {
+   298→    newLessons.push({
+   299→      type: 'bad_rr',
+   300→      description: `Плохое R:R (${rr.toFixed(2)}) — потенциальная прибыль не покрывает риск. Минимум ${adaptive.minRr}`,
+   301→      coinId: trade.coinId,
+   302→      value: rr,
+   303→      timestamp: Date.now(),
+   304→      tradeId: trade.id,
+   305→      severity: rr < 1.0 ? 'high' : 'medium',
+   306→    });
+   307→  }
+   308→
+   309→  return newLessons;
+   310→}
+   311→
+   312→// ============================================
+   313→// ADAPTIVE LEARNING — Update parameters from accumulated lessons
+   314→// ============================================
+   315→
+   316→function updateAdaptiveParams(adaptive: AdaptiveParams): AdaptiveParams {
+   317→  const updated = { ...adaptive, lessons: [...adaptive.lessons] };
+   318→
+   319→  // Count SL-too-close lessons in recent history
+   320→  const slCloseLessons = updated.lessons.filter(l => l.type === 'sl_too_close');
+   321→  if (slCloseLessons.length >= 1) {
+   322→    // Find the worst SL distance from recent mistakes and set minimum above it
+   323→    const worstSl = Math.min(...slCloseLessons.map(l => l.value || 0));
+   324→    const newMin = Math.max(updated.minSlDistancePct, worstSl + 0.15, 0.5);
+   325→    updated.minSlDistancePct = Math.round(newMin * 100) / 100;
+   326→  }
+   327→
+   328→  // Count low-confidence losses
+   329→  const lowConfLessons = updated.lessons.filter(l => l.type === 'low_confidence');
+   330→  if (lowConfLessons.length >= 2) {
+   331→    const highestFailedConf = Math.max(...lowConfLessons.map(l => l.value || 0));
+   332→    updated.minConfidence = Math.min(Math.max(updated.minConfidence, highestFailedConf + 5, 60), 75);
+   333→  }
+   334→
+   335→  // Count bad R:R lessons
+   336→  const badRrLessons = updated.lessons.filter(l => l.type === 'bad_rr');
+   337→  if (badRrLessons.length >= 2) {
+   338→    const worstRr = Math.min(...badRrLessons.map(l => l.value || 0));
+   339→    updated.minRr = Math.max(updated.minRr, worstRr + 0.3, 1.8);
+   340→  }
+   341→
+   342→  // Auto-add coins to avoid based on repeated losses
+   343→  const coinLossCount = new Map<string, number>();
+   344→  for (const l of updated.lessons) {
+   345→    if (l.coinId && (l.type === 'sl_too_close' || l.type === 'low_confidence')) {
+   346→      coinLossCount.set(l.coinId, (coinLossCount.get(l.coinId) || 0) + 1);
+   347→    }
+   348→  }
+   349→  for (const [coinId, count] of coinLossCount) {
+   350→    if (count >= 2 && !updated.avoidCoins.includes(coinId)) {
+   351→      updated.avoidCoins = [...updated.avoidCoins, coinId];
+   352→      updated.lessons.push({
+   353→        type: 'bad_coin',
+   354→        description: `${coinId} — повторяющиеся ошибки (${count} раз). Монета добавлена в список избегаемых`,
+   355→        coinId,
+   356→        timestamp: Date.now(),
+   357→        tradeId: '',
+   358→        severity: 'high',
+   359→      });
+   360→    }
+   361→  }
+   362→
+   363→  updated.lessonsVersion++;
+   364→  return updated;
+   365→}
+   366→
+   367→// ============================================
+   368→// TRADE RESOLUTION
+   369→// ============================================
+   370→
+   371→interface ClosedTradeInfo {
+   372→  tradeId: string; coinSymbol: string; coinId: string; direction: 'LONG' | 'SHORT';
+   373→  entryType: 'LIMIT' | 'MARKET'; confidence: number;
+   374→  result: 'WIN' | 'LOSS' | 'EXPIRED'; exitReason: string;
+   375→  pnlUSDT: number; entry: number; exitPrice: number;
+   376→}
+   377→
+   378→function resolveTrades(data: TraderData, currentPrices: Record<string, number>): { data: TraderData; closedInfo: ClosedTradeInfo[] } {
+   379→  const now = Date.now();
+   380→  const closedInfo: ClosedTradeInfo[] = [];
+   381→
+   382→  let balance = data.balance;
+   383→  let wins = 0, losses = 0, expired = 0;
+   384→  let totalPnl = 0, pnlCount = 0;
+   385→  let streak = 0, score = 0;
+   386→  let bestTrade = 0, worstTrade = 0;
+   387→
+   388→  const updatedTrades: Trade[] = [];
+   389→  const newLessons: Lesson[] = [];
+   390→  let adaptive = { ...data.adaptive, lessons: [...data.adaptive.lessons] };
+   391→
+   392→  for (const trade of data.trades) {
+   393→    if (trade.resolved) {
+   394→      updatedTrades.push(trade);
+   395→      if (trade.result === 'WIN') {
+   396→        wins++; score += trade.pointsChange || 10;
+   397→        if (trade.pnlUSDT) { totalPnl += trade.pnlUSDT; pnlCount++; }
+   398→        streak = streak > 0 ? streak + 1 : 1;
+   399→        if (trade.pnlUSDT && trade.pnlUSDT > bestTrade) bestTrade = trade.pnlUSDT;
+   400→      } else if (trade.result === 'LOSS') {
+   401→        losses++; score += trade.pointsChange || -15;
+   402→        if (trade.pnlUSDT) { totalPnl += trade.pnlUSDT; pnlCount++; }
+   403→        streak = streak < 0 ? streak - 1 : -1;
+   404→        if (trade.pnlUSDT && trade.pnlUSDT < worstTrade) worstTrade = trade.pnlUSDT;
+   405→        // Learn from this loss
+   406→        const lessons = analyzeTradeMistakes(trade, adaptive);
+   407→        newLessons.push(...lessons);
+   408→      } else {
+   409→        expired++; streak = 0;
+   410→      }
+   411→      continue;
+   412→    }
+   413→
+   414→    const price = currentPrices[trade.coinId];
+   415→    const age = now - trade.timestamp;
+   416→    const enteredAge = trade.enteredAt ? now - trade.enteredAt : 0;
+   417→
+   418→    // ===== LIMIT order entry check =====
+   419→    if (!trade.entryReached && trade.entryType === 'LIMIT' && price) {
+   420→      if (trade.direction === 'LONG' && price <= trade.entry) trade.entryReached = true;
+   421→      if (trade.direction === 'SHORT' && price >= trade.entry) trade.entryReached = true;
+   422→      if (trade.entryReached) {
+   423→        trade.enteredAt = now;
+   424→        updatedTrades.push({ ...trade, entryReached: true, enteredAt: now });
+   425→        continue;
+   426→      }
+   427→    }
+   428→    if (trade.entryType === 'MARKET' && !trade.entryReached) {
+   429→      trade.entryReached = true;
+   430→      trade.enteredAt = trade.timestamp;
+   431→    }
+   432→
+   433→    // ===== LIMIT expiry: cancel if not triggered within 2 hours =====
+   434→    if (!trade.entryReached && age > LIMIT_EXPIRY_AGE) {
+   435→      const resolved = {
+   436→        ...trade, resolved: true, result: 'EXPIRED' as const,
+   437→        closedAt: now, exitPrice: price || trade.currentPrice,
+   438→        exitReason: `Лимитный ордер не сработал за 2ч — капитал освобождён`, pnlUSDT: 0, pnlPct: 0, pointsChange: -3,
+   439→      };
+   440→      updatedTrades.push(resolved);
+   441→      expired++; score -= 3; streak = 0;
+   442→      balance += trade.positionSize;
+   443→      // Lesson: LIMIT orders that don't trigger
+   444→      if (adaptive.marketEntryConditions.length < 10) {
+   445→        newLessons.push({
+   446→          type: 'limit_expired',
+   447→          description: `LIMIT ордер на ${trade.coinSymbol} не сработал за 2ч — при сильном сигнале лучше входить по рынку`,
+   448→          coinId: trade.coinId,
+   449→          direction: trade.direction,
+   450→          value: trade.confidence,
+   451→          timestamp: Date.now(),
+   452→          tradeId: trade.id,
+   453→          severity: 'low',
+   454→        });
+   455→      }
+   456→      continue;
+   457→    }
+   458→
+   459→    // ===== Stale position: close at market if open for 3h without TP/SL =====
+   460→    if (trade.entryReached && enteredAge > STALE_TRADE_AGE && price) {
+   461→      const pnlUSDT = calculatePnL(trade, price);
+   462→      const pnlPct = trade.positionSize > 0 ? (pnlUSDT / trade.positionSize) * 100 : 0;
+   463→      const isProfit = pnlUSDT >= 0;
+   464→      const resolved = {
+   465→        ...trade, resolved: true, result: isProfit ? 'WIN' as const : 'LOSS' as const,
+   466→        closedAt: now, exitPrice: price,
+   467→        exitReason: `Позиция закрыта по таймауту (3ч) — ${isProfit ? 'в профите' : 'в убытке'} $${Math.abs(pnlUSDT).toFixed(2)}`,
+   468→        pnlUSDT, pnlPct, pointsChange: isProfit ? Math.round(5 + pnlPct) : Math.round(-10 + pnlPct),
+   469→      };
+   470→      updatedTrades.push(resolved);
+   471→      if (isProfit) {
+   472→        wins++; score += resolved.pointsChange;
+   473→        streak = streak > 0 ? streak + 1 : 1;
+   474→        if (pnlUSDT > bestTrade) bestTrade = pnlUSDT;
+   475→      } else {
+   476→        losses++; score += resolved.pointsChange;
+   477→        streak = streak < 0 ? streak - 1 : -1;
+   478→        if (pnlUSDT < worstTrade) worstTrade = pnlUSDT;
+   479→        // Learn from timeout loss
+   480→        const lessons = analyzeTradeMistakes(resolved, adaptive);
+   481→        newLessons.push(...lessons);
+   482→      }
+   483→      balance += trade.positionSize + pnlUSDT;
+   484→      totalPnl += pnlUSDT; pnlCount++;
+   485→      continue;
+   486→    }
+   487→
+   488→    // ===== Absolute maximum age safety net (24h) =====
+   489→    if (age > MAX_POSITION_AGE && trade.entryReached) {
+   490→      const exitPrice = price || trade.currentPrice;
+   491→      const pnlUSDT = price ? calculatePnL(trade, exitPrice) : 0;
+   492→      const pnlPct = trade.positionSize > 0 ? (pnlUSDT / trade.positionSize) * 100 : 0;
+   493→      const resolved = {
+   494→        ...trade, resolved: true, result: 'EXPIRED' as const,
+   495→        closedAt: now, exitPrice,
+   496→        exitReason: 'Сигнал истёк (24ч) — закрыт по текущей цене',
+   497→        pnlUSDT, pnlPct, pointsChange: pnlUSDT >= 0 ? 5 : -8,
+   498→      };
+   499→      updatedTrades.push(resolved);
+   500→      expired++; score += resolved.pointsChange; streak = 0;
+   501→      balance += trade.positionSize + pnlUSDT;
+   502→      if (pnlUSDT > bestTrade) bestTrade = pnlUSDT;
+   503→      if (pnlUSDT < worstTrade) worstTrade = pnlUSDT;
+   504→      totalPnl += pnlUSDT; pnlCount++;
+   505→      continue;
+   506→    }
+   507→
+   508→    if (age > MAX_POSITION_AGE) {
+   509→      const resolved = {
+   510→        ...trade, resolved: true, result: 'EXPIRED' as const,
+   511→        closedAt: now, exitPrice: price || trade.currentPrice,
+   512→        exitReason: 'Сигнал истёк (24ч)', pnlUSDT: 0, pnlPct: 0, pointsChange: -3,
+   513→      };
+   514→      updatedTrades.push(resolved);
+   515→      expired++; score -= 3; streak = 0;
+   516→      balance += trade.positionSize;
+   517→      continue;
+   518→    }
+   519→
+   520→    if (!price || !trade.entryReached) {
+   521→      updatedTrades.push(trade);
+   522→      continue;
+   523→    }
+   524→
+   525→    // ===== Update high/low tracking for trailing stops =====
+   526→    let updatedTrade = { ...trade };
+   527→    if (price > (updatedTrade.highestPrice || 0)) updatedTrade.highestPrice = price;
+   528→    if (price < (updatedTrade.lowestPrice || Infinity)) updatedTrade.lowestPrice = price;
+   529→
+   530→    // ===== Partial Exit Check (before TP/SL) =====
+   531→    // Check partial exits if the trade has takeProfit levels and hasn't been fully partial-exited
+   532→    const hasPartialExits = (updatedTrade.partialExits && updatedTrade.partialExits !== '[]') || false;
+   533→    const canPartialExit = updatedTrade.takeProfit2 > 0 && updatedTrade.takeProfit3 > 0;
+   534→
+   535→    if (canPartialExit && !updatedTrade.resolved) {
+   536→      const partialResult = checkPartialExits(updatedTrade, price);
+   537→      if (partialResult.exit) {
+   538→        // Accumulate partial exit PnL
+   539→        const partialPnl = partialResult.exit.pnl;
+   540→        const partialCommission = partialResult.exit.commission;
+   541→        // Credit partial PnL back to balance immediately
+   542→        balance += (updatedTrade.positionSize * (partialResult.exit.percent / 100)) + partialPnl;
+   543→        totalPnl += partialPnl; pnlCount++;
+   544→
+   545→        // Parse and store partial exits
+   546→        let exits: EnginePartialExit[] = [];
+   547→        if (updatedTrade.partialExits) {
+   548→          try { exits = JSON.parse(updatedTrade.partialExits); } catch { exits = []; }
+   549→        }
+   550→        exits.push(partialResult.exit);
+   551→
+   552→        updatedTrade = {
+   553→          ...updatedTrade,
+   554→          partialExits: JSON.stringify(exits),
+   555→          remainingQuantity: partialResult.remainingQuantity,
+   556→          // After TP1, move stopLoss to breakeven
+   557→          stopLoss: partialResult.exit.tpLevel === 1 ? updatedTrade.entry : updatedTrade.stopLoss,
+   558→        };
+   559→
+   560→        // If all closed via partial exits, resolve as WIN
+   561→        if (partialResult.allClosed) {
+   562→          const totalPartialPnl = exits.reduce((s, e) => s + e.pnl, 0);
+   563→          const pnlPct = updatedTrade.positionSize > 0 ? (totalPartialPnl / updatedTrade.positionSize) * 100 : 0;
+   564→          const pointsChange = Math.round(10 + pnlPct * 2);
+   565→          const resolved = {
+   566→            ...updatedTrade, resolved: true, result: 'WIN' as const, closedAt: now,
+   567→            exitPrice: price,
+   568→            exitReason: `Все TP достигнуты (частичные выходы: TP1=50%, TP2=30%, TP3=20%) — общий PnL $${totalPartialPnl.toFixed(2)}`,
+   569→            pnlUSDT: Math.round(totalPartialPnl * 100) / 100,
+   570→            pnlPct: Math.round(pnlPct * 100) / 100,
+   571→            pointsChange,
+   572→          };
+   573→          updatedTrades.push(resolved);
+   574→          wins++; score += pointsChange;
+   575→          streak = streak > 0 ? streak + 1 : 1;
+   576→          if (totalPartialPnl > bestTrade) bestTrade = totalPartialPnl;
+   577→          // Return remaining position size (should be ~0 at this point)
+   578→          const alreadyReturned = exits.reduce((s, e) => s + (updatedTrade.positionSize * (e.percent / 100)), 0);
+   579→          const remainingMargin = updatedTrade.positionSize - alreadyReturned;
+   580→          if (remainingMargin > 0) balance += remainingMargin;
+   581→          continue;
+   582→        }
+   583→      }
+   584→    }
+   585→
+   586→    // ===== Trailing Stop Check =====
+   587→    if (updatedTrade.trailingStop && !updatedTrade.resolved) {
+   588→      const trailingResult = updateTrailingStop(updatedTrade, price);
+   589→      if (trailingResult.newStopLoss !== null) {
+   590→        updatedTrade.stopLoss = trailingResult.newStopLoss;
+   591→      }
+   592→      if (trailingResult.triggered) {
+   593→        const pnlUSDT = calculatePnL(updatedTrade, updatedTrade.stopLoss);
+   594→        const pnlPct = updatedTrade.positionSize > 0 ? (pnlUSDT / updatedTrade.positionSize) * 100 : 0;
+   595→        const isProfit = pnlUSDT >= 0;
+   596→        const pointsChange = isProfit ? Math.round(10 + pnlPct * 2) : Math.round(-15 + pnlPct);
+   597→        const resolved = {
+   598→          ...updatedTrade, resolved: true,
+   599→          result: isProfit ? 'WIN' as const : 'LOSS' as const,
+   600→          closedAt: now, exitPrice: updatedTrade.stopLoss,
+   601→          exitReason: `Трейлинг-стоп: ${trailingResult.reason}`,
+   602→          pnlUSDT, pnlPct, pointsChange,
+   603→        };
+   604→        updatedTrades.push(resolved);
+   605→        if (isProfit) {
+   606→          wins++; score += pointsChange;
+   607→          streak = streak > 0 ? streak + 1 : 1;
+   608→          if (pnlUSDT > bestTrade) bestTrade = pnlUSDT;
+   609→        } else {
+   610→          losses++; score += pointsChange;
+   611→          streak = streak < 0 ? streak - 1 : -1;
+   612→          if (pnlUSDT < worstTrade) worstTrade = pnlUSDT;
+   613→          const lessons = analyzeTradeMistakes(resolved, adaptive);
+   614→          newLessons.push(...lessons);
+   615→        }
+   616→        // Return position size
+   617→        balance += updatedTrade.positionSize + pnlUSDT;
+   618→        totalPnl += pnlUSDT; pnlCount++;
+   619→        continue;
+   620→      }
+   621→    }
+   622→
+   623→    // ===== Check TP or SL (original logic, respects partial exits) =====
+   624→    if (updatedTrade.direction === 'LONG') {
+   625→      if (price >= updatedTrade.takeProfit1) {
+   626→        const pnlUSDT = calculatePnL(updatedTrade, updatedTrade.takeProfit1);
+   627→        const pnlPct = updatedTrade.positionSize > 0 ? (pnlUSDT / updatedTrade.positionSize) * 100 : 0;
+   628→        const pointsChange = Math.round(10 + pnlPct * 2);
+   629→        const resolved = { ...updatedTrade, resolved: true, result: 'WIN' as const, closedAt: now, exitPrice: updatedTrade.takeProfit1,
+   630→          exitReason: `TP1 достигнут — цена поднялась до $${updatedTrade.takeProfit1.toFixed(2)}`, pnlUSDT, pnlPct, pointsChange };
+   631→        updatedTrades.push(resolved);
+   632→        wins++; score += pointsChange; totalPnl += pnlUSDT; pnlCount++;
+   633→        balance += updatedTrade.positionSize + pnlUSDT;
+   634→        streak = streak > 0 ? streak + 1 : 1;
+   635→        if (pnlUSDT > bestTrade) bestTrade = pnlUSDT;
+   636→      } else if (price <= updatedTrade.stopLoss) {
+   637→        const pnlUSDT = calculatePnL(updatedTrade, updatedTrade.stopLoss);
+   638→        const pnlPct = updatedTrade.positionSize > 0 ? (pnlUSDT / updatedTrade.positionSize) * 100 : 0;
+   639→        const pointsChange = Math.round(-15 + pnlPct);
+   640→        const resolved = { ...updatedTrade, resolved: true, result: 'LOSS' as const, closedAt: now, exitPrice: updatedTrade.stopLoss,
+   641→          exitReason: `Стоп-лосс сработал — цена упала до $${updatedTrade.stopLoss.toFixed(2)}`, pnlUSDT, pnlPct, pointsChange };
+   642→        updatedTrades.push(resolved);
+   643→        losses++; score += pointsChange; totalPnl += pnlUSDT; pnlCount++;
+   644→        balance += updatedTrade.positionSize + pnlUSDT;
+   645→        streak = streak < 0 ? streak - 1 : -1;
+   646→        if (pnlUSDT < worstTrade) worstTrade = pnlUSDT;
+   647→        // Learn from SL hit
+   648→        const lessons = analyzeTradeMistakes(resolved, adaptive);
+   649→        newLessons.push(...lessons);
+   650→      } else {
+   651→        updatedTrades.push(updatedTrade);
+   652→      }
+   653→    } else {
+   654→      if (price <= updatedTrade.takeProfit1) {
+   655→        const pnlUSDT = calculatePnL(updatedTrade, updatedTrade.takeProfit1);
+   656→        const pnlPct = updatedTrade.positionSize > 0 ? (pnlUSDT / updatedTrade.positionSize) * 100 : 0;
+   657→        const pointsChange = Math.round(10 + pnlPct * 2);
+   658→        const resolved = { ...updatedTrade, resolved: true, result: 'WIN' as const, closedAt: now, exitPrice: updatedTrade.takeProfit1,
+   659→          exitReason: `TP1 достигнут — цена снизилась до $${updatedTrade.takeProfit1.toFixed(2)}`, pnlUSDT, pnlPct, pointsChange };
+   660→        updatedTrades.push(resolved);
+   661→        wins++; score += pointsChange; totalPnl += pnlUSDT; pnlCount++;
+   662→        balance += updatedTrade.positionSize + pnlUSDT;
+   663→        streak = streak > 0 ? streak + 1 : 1;
+   664→        if (pnlUSDT > bestTrade) bestTrade = pnlUSDT;
+   665→      } else if (price >= updatedTrade.stopLoss) {
+   666→        const pnlUSDT = calculatePnL(updatedTrade, updatedTrade.stopLoss);
+   667→        const pnlPct = updatedTrade.positionSize > 0 ? (pnlUSDT / updatedTrade.positionSize) * 100 : 0;
+   668→        const pointsChange = Math.round(-15 + pnlPct);
+   669→        const resolved = { ...updatedTrade, resolved: true, result: 'LOSS' as const, closedAt: now, exitPrice: updatedTrade.stopLoss,
+   670→          exitReason: `Стоп-лосс сработал — цена поднялась до $${updatedTrade.stopLoss.toFixed(2)}`, pnlUSDT, pnlPct, pointsChange };
+   671→        updatedTrades.push(resolved);
+   672→        losses++; score += pointsChange; totalPnl += pnlUSDT; pnlCount++;
+   673→        balance += updatedTrade.positionSize + pnlUSDT;
+   674→        streak = streak < 0 ? streak - 1 : -1;
+   675→        if (pnlUSDT < worstTrade) worstTrade = pnlUSDT;
+   676→        // Learn from SL hit
+   677→        const lessons = analyzeTradeMistakes(resolved, adaptive);
+   678→        newLessons.push(...lessons);
+   679→      } else {
+   680→        updatedTrades.push(updatedTrade);
+   681→      }
+   682→    }
+   683→  }
+   684→
+   685→  balance = Math.max(0, Math.round(balance * 100) / 100);
+   686→
+   687→  // Apply new lessons
+   688→  if (newLessons.length > 0) {
+   689→    adaptive.lessons = [...adaptive.lessons, ...newLessons].slice(-100); // Keep last 100
+   690→    adaptive = updateAdaptiveParams(adaptive);
+   691→  }
+   692→
+   693→  // Auto-repay debt from balance if profitable
+   694→  let totalDebt = data.totalDebt;
+   695→  let totalRepaid = data.totalRepaid;
+   696→  const debtHistory = [...data.debtHistory];
+   697→  const totalBorrowed = debtHistory.reduce((s, d) => s + d.amount, 0);
+   698→  if (totalDebt > 0 && balance > data.initialDeposit + totalBorrowed) {
+   699→    const canRepay = Math.min(totalDebt, balance - 10);
+   700→    if (canRepay > 0) {
+   701→      totalDebt -= canRepay;
+   702→      totalRepaid += canRepay;
+   703→      balance -= canRepay;
+   704→      let remaining = canRepay;
+   705→      for (let i = debtHistory.length - 1; i >= 0 && remaining > 0; i--) {
+   706→        const owed = debtHistory[i].remainingOwed;
+   707→        if (owed <= remaining) {
+   708→          remaining -= owed;
+   709→          debtHistory[i].remainingOwed = 0;
+   710→        } else {
+   711→          debtHistory[i].remainingOwed -= remaining;
+   712→          remaining = 0;
+   713→        }
+   714→      }
+   715→    }
+   716→  }
+   717→
+   718→  const totalResolved = wins + losses + expired;
+   719→  const { level, emoji } = getLevel(score);
+   720→
+   721→  const lastSnapshot = data.depositHistory[data.depositHistory.length - 1];
+   722→  const depositHistory = [...data.depositHistory];
+   723→  if (!lastSnapshot || now - lastSnapshot.timestamp > 5 * 60 * 1000) {
+   724→    const lockedPositions = updatedTrades
+   725→      .filter(t => !t.resolved)
+   726→      .reduce((sum, t) => sum + t.positionSize, 0);
+   727→    const equity = balance + lockedPositions + calcUnrealizedPnL(updatedTrades, currentPrices);
+   728→    depositHistory.push({ timestamp: now, balance, equity: Math.round(equity * 100) / 100 });
+   729→  }
+   730→
+   731→  return {
+   732→    data: {
+   733→      ...data, balance,
+   734→      totalTrades: data.totalTrades,
+   735→      wins, losses, expired, score,
+   736→      winRate: totalResolved > 0 ? Math.round((wins / totalResolved) * 100) : 0,
+   737→      avgPnl: pnlCount > 0 ? Math.round((totalPnl / pnlCount) * 100) / 100 : 0,
+   738→      streak,
+   739→      bestTrade: Math.round(bestTrade * 100) / 100,
+   740→      worstTrade: Math.round(worstTrade * 100) / 100,
+   741→      totalPnl: Math.round(totalPnl * 100) / 100,
+   742→      level, levelEmoji: emoji,
+   743→      trades: updatedTrades.slice(-100),
+   744→      depositHistory: depositHistory.slice(-500),
+   745→      lastUpdated: now,
+   746→      totalDebt: Math.round(totalDebt * 100) / 100,
+   747→      debtHistory,
+   748→      totalRepaid: Math.round(totalRepaid * 100) / 100,
+   749→      adaptive,
+   750→    },
+   751→    closedInfo,
+   752→  };
+   753→}
+   754→
+   755→// Extract closed trade info by comparing old trades (unresolved) with new trades (resolved)
+   756→function extractClosedInfo(oldTrades: Trade[], newData: TraderData): ClosedTradeInfo[] {
+   757→  const closedInfo: ClosedTradeInfo[] = [];
+   758→  const oldUnresolved = new Set(oldTrades.filter(t => !t.resolved).map(t => t.id));
+   759→  for (const trade of newData.trades) {
+   760→    if (oldUnresolved.has(trade.id) && trade.resolved && trade.result) {
+   761→      closedInfo.push({
+   762→        tradeId: trade.id, coinSymbol: trade.coinSymbol, coinId: trade.coinId,
+   763→        direction: trade.direction, entryType: trade.entryType, confidence: trade.confidence,
+   764→        result: trade.result, exitReason: trade.exitReason || '',
+   765→        pnlUSDT: trade.pnlUSDT || 0, entry: trade.entry, exitPrice: trade.exitPrice || 0,
+   766→      });
+   767→    }
+   768→  }
+   769→  return closedInfo;
+   770→}
+   771→
+   772→function calculatePnL(trade: Trade, exitPrice: number): number {
+   773→  const { direction, entry, quantity, leverage } = trade;
+   774→  // Use realistic PnL with commission & slippage
+   775→  const result = calculateRealisticPnL({
+   776→    direction,
+   777→    entryPrice: entry,
+   778→    exitPrice,
+   779→    quantity: trade.remainingQuantity ?? quantity,
+   780→    leverage,
+   781→  });
+   782→  return result.netPnl;
+   783→}
+   784→
+   785→function calcUnrealizedPnL(trades: Trade[], currentPrices: Record<string, number>): number {
+   786→  let unrealized = 0;
+   787→  for (const t of trades) {
+   788→    if (t.resolved || !t.entryReached) continue;
+   789→    const price = currentPrices[t.coinId];
+   790→    if (!price) continue;
+   791→    unrealized += calculatePnL(t, price);
+   792→  }
+   793→  return Math.round(unrealized * 100) / 100;
+   794→}
+   795→
+   796→async function getCurrentPrices(): Promise<Record<string, number>> {
+   797→  const currentPrices: Record<string, number> = {};
+   798→  try {
+   799→    const marketRes = await fetch(`http://localhost:${process.env.PORT || 3000}/api/crypto/market`);
+   800→    if (marketRes.ok) {
+   801→      const marketData = await marketRes.json();
+   802→      if (Array.isArray(marketData.data)) {
+   803→        for (const coin of marketData.data) {
+   804→          currentPrices[coin.id] = coin.current_price;
+   805→        }
+   806→      }
+   807→    }
+   808→  } catch {}
+   809→  return currentPrices;
+   810→}
+   811→
+   812→// ============================================
+   813→// API ROUTES
+   814→// ============================================
+   815→
+   816→export async function GET(request: Request) {
+   817→  const clientIp = request.headers.get('x-forwarded-for') || 'unknown';
+   818→  const { allowed, remaining, resetAt } = rateLimit(`api:reputation:${clientIp}`, RATE_LIMITS.reputation);
+   819→  if (!allowed) {
+   820→    const retryAfter = Math.ceil((resetAt - Date.now()) / 1000);
+   821→    return NextResponse.json({ error: 'Rate limit exceeded', retryAfter }, { status: 429, headers: { 'Retry-After': String(retryAfter) } });
+   822→  }
+   823→
+   824→  try {
+   825→    const data = await loadData();
+   826→    const currentPrices = await getCurrentPrices();
+   827→    const { data: resolved, closedInfo } = resolveTrades(data, currentPrices);
+   828→    await saveData(resolved);
+   829→    // Record thoughts for closed trades
+   830→    for (const ci of closedInfo) {
+   831→      await recordThought({
+   832→        type: 'close',
+   833→        title: `${ci.result === 'WIN' ? 'ПРИБЫЛЬ' : ci.result === 'LOSS' ? 'УБЫТОК' : 'ИСТЕКЛО'}: ${ci.coinSymbol} ${ci.direction}`,
+   834→        detail: `${ci.exitReason}. PnL: $${ci.pnlUSDT >= 0 ? '+' : ''}${ci.pnlUSDT.toFixed(2)}. Вход: $${ci.entry.toFixed(2)} → Выход: $${ci.exitPrice.toFixed(2)}. ${ci.entryType === 'MARKET' ? 'Рыночный' : 'Лимитный'} вход, уверенность ${ci.confidence}%`,
+   835→        coinSymbol: ci.coinSymbol, coinId: ci.coinId, direction: ci.direction,
+   836→        confidence: ci.confidence, tradeId: ci.tradeId, pnl: ci.pnlUSDT,
+   837→        entryType: ci.entryType,
+   838→        emotion: ci.result === 'WIN' ? 'satisfied' : ci.result === 'LOSS' ? 'frustrated' : 'cautious',
+   839→        tags: ['close', ci.result.toLowerCase(), ci.direction.toLowerCase(), ci.entryType.toLowerCase()],
+   840→      });
+   841→      // Audit: trade closed
+   842→      auditTradeClosed(ci, ci.pnlUSDT);
+   843→    }
+   844→    const lockedInPositions = resolved.trades
+   845→      .filter(t => !t.resolved)
+   846→      .reduce((sum, t) => sum + t.positionSize, 0);
+   847→    const freeBalance = Math.max(0, Math.round(resolved.balance * 100) / 100);
+   848→    return NextResponse.json({ ...resolved, lockedInPositions: Math.round(lockedInPositions * 100) / 100, freeBalance }, { headers: { 'X-RateLimit-Remaining': String(remaining) } });
+   849→  } catch (error) {
+   850→    console.error('Trader GET error:', error);
+   851→    return NextResponse.json({ error: 'Failed to load trader data' }, { status: 500 });
+   852→  }
+   853→}
+   854→
+   855→export async function POST(request: Request) {
+   856→  try {
+   857→    const body = await request.json();
+   858→    const data = await loadData();
+   859→
+   860→    // Dedup: don't open same direction on same coin if already open
+   861→    const existingOpen = data.trades.filter(
+   862→      t => !t.resolved && t.coinId === (body.coinId || 'bitcoin') && t.direction === body.direction
+   863→    );
+   864→    if (existingOpen.length > 0) {
+   865→      return NextResponse.json({ success: false, reason: 'already_open', reputation: data });
+   866→    }
+   867→
+   868→    // Free balance is the actual available cash
+   869→    const freeBalance = Math.max(0, data.balance);
+   870→    if (freeBalance < 3) {
+   871→      return NextResponse.json({ success: false, reason: 'low_free_balance', reputation: data });
+   872→    }
+   873→
+   874→    const adaptive = data.adaptive || DEFAULT_ADAPTIVE;
+   875→    const coinId = body.coinId || 'bitcoin';
+   876→    const newDirection = (body.direction || 'LONG') as 'LONG' | 'SHORT';
+   877→    const openTrades = data.trades.filter(t => !t.resolved);
+   878→
+   879→    // ========================================
+   880→    // PORTFOLIO RISK CHECK (trading engine)
+   881→    // ========================================
+   882→    const initialDeposit = data.initialDeposit || 100;
+   883→    const currentDrawdownPct = freeBalance < initialDeposit
+   884→      ? ((initialDeposit - freeBalance) / initialDeposit) * 100
+   885→      : 0;
+   886→
+   887→    const riskCheck = checkPortfolioRisk({
+   888→      freeBalance,
+   889→      openTrades,
+   890→      newDirection,
+   891→      newCoinId: coinId,
+   892→      newCoinSymbol: body.coinSymbol || 'BTC',
+   893→      maxDrawdownPct: 20,
+   894→      maxOpenPositions: 5,
+   895→      maxCorrelatedPositions: 3,
+   896→      maxPortfolioRiskPct: 40,
+   897→    });
+   898→
+   899→    if (!riskCheck.allowed) {
+   900→      return NextResponse.json({ success: false, reason: 'risk_rejected', detail: riskCheck.reason, reputation: data });
+   901→    }
+   902→
+   903→    // Stop trading if drawdown exceeds 20%
+   904→    if (currentDrawdownPct >= 20) {
+   905→      auditDrawdownWarning(currentDrawdownPct, 20);
+   906→      return NextResponse.json({
+   907→        success: false,
+   908→        reason: 'max_drawdown',
+   909→        detail: `Просадка ${currentDrawdownPct.toFixed(1)}% — торговля приостановлена для снижения риска`,
+   910→        reputation: data,
+   911→      });
+   912→    }
+   913→
+   914→    // ========================================
+   915→    // ADAPTIVE LEARNING — Pre-trade checks
+   916→    // ========================================
+   917→
+   918→    // Check 1: Avoid coins that have been consistently losing
+   919→    if (adaptive.avoidCoins.includes(coinId)) {
+   920→      return NextResponse.json({ success: false, reason: 'coin_avoided', detail: `Монета ${coinId} в списке избегаемых (повторяющиеся ошибки)`, reputation: data });
+   921→    }
+   922→
+   923→    const entry = body.entry || 0;
+   924→    const stopLoss = body.stopLoss || 0;
+   925→    const slDistancePct = entry > 0 ? (Math.abs(entry - stopLoss) / entry) * 100 : 0;
+   926→
+   927→    // Check 2: SL too close (learned minimum)
+   928→    if (slDistancePct > 0 && slDistancePct < adaptive.minSlDistancePct * 0.8) { // Only hard-reject if significantly below
+   929→      return NextResponse.json({
+   930→        success: false,
+   931→        reason: 'sl_too_close_learned',
+   932→        detail: `SL слишком близко (${slDistancePct.toFixed(2)}%) — минимум ${adaptive.minSlDistancePct.toFixed(1)}% по опыту прошлых ошибок`,
+   933→        reputation: data,
+   934→      });
+   935→    }
+   936→
+   937→    // Check 3: Confidence below learned minimum
+   938→    const confidence = body.confidence || 0;
+   939→    if (confidence > 0 && confidence < adaptive.minConfidence * 0.8) { // Only hard-reject if significantly below
+   940→      return NextResponse.json({
+   941→        success: false,
+   942→        reason: 'low_confidence_learned',
+   943→        detail: `Уверенность ${confidence}% ниже порога ${adaptive.minConfidence}% — по опыту такие сделки убыточны`,
+   944→        reputation: data,
+   945→      });
+   946→    }
+   947→
+   948→    // Check 4: Bad R:R ratio
+   949→    const takeProfit1 = body.takeProfit1 || 0;
+   950→    if (entry > 0 && stopLoss > 0 && takeProfit1 > 0) {
+   951→      const rr = Math.round((Math.abs(takeProfit1 - entry) / Math.abs(entry - stopLoss)) * 100) / 100; // Round to avoid float precision issues
+   952→      if (rr < adaptive.minRr * 0.7) { // Only hard-reject if R:R is significantly below threshold
+   953→        return NextResponse.json({
+   954→          success: false,
+   955→          reason: 'bad_rr_learned',
+   956→          detail: `R:R = ${rr.toFixed(2)} ниже минимума ${adaptive.minRr} — риск не оправдан`,
+   957→          reputation: data,
+   958→        });
+   959→      }
+   960→    }
+   961→
+   962→    // ========================================
+   963→    // Decide entry type: LIMIT vs MARKET
+   964→    // ========================================
+   965→    let entryType: 'LIMIT' | 'MARKET' = body.entryType || 'LIMIT';
+   966→    const currentPrice = body.currentPrice || 0;
+   967→    const priceDiffFromEntry = currentPrice > 0 && entry > 0 ? Math.abs(currentPrice - entry) / currentPrice * 100 : 0;
+   968→
+   969→    // Use MARKET entry when:
+   970→    // 1. Price is very close to intended entry (< 0.3% away) — no point waiting for LIMIT
+   971→    // 2. Strong momentum or breakout pattern — waiting = missing the move
+   972→    // 3. Many LIMIT orders have expired before (learned lesson)
+   973→    // NOTE: High confidence alone is NOT enough — if price is far from optimal entry, LIMIT is safer
+   974→    const limitExpiredLessons = adaptive.lessons.filter(l => l.type === 'limit_expired').length;
+   975→    const isBreakout = (body.reasons || []).some(r => r.includes('пробой') || r.includes('пробит') || r.includes('прорыв') || r.includes('breakout'));
+   976→    const shouldUseMarket = (
+   977→      priceDiffFromEntry < 0.3 ||
+   978→      isBreakout ||
+   979→      limitExpiredLessons >= 3
+   980→    );
+   981→
+   982→    if (shouldUseMarket && entryType === 'LIMIT') {
+   983→      entryType = 'MARKET';
+   984→    }
+   985→
+   986→    // If frontend sent MARKET but price is far from optimal entry, downgrade to LIMIT
+   987→    // Don't chase price — wait for pullback to the intended level
+   988→    if (entryType === 'MARKET' && !isBreakout && priceDiffFromEntry > 1.0) {
+   989→      entryType = 'LIMIT';
+   990→    }
+   991→
+   992→    const leverage = body.leverage || data.defaultLeverage;
+   993→    // Use adjusted leverage from risk manager if it reduced it
+   994→    const effectiveLeverage = Math.min(leverage, riskCheck.adjustedLeverage);
+   995→    const actualEntry = entryType === 'MARKET' ? currentPrice : entry;
+   996→
+   997→    // ===== When using MARKET entry at a different price, recalculate SL/TP to preserve R:R =====
+   998→    let adjustedStopLoss = stopLoss;
+   999→    let adjustedTakeProfit1 = takeProfit1;
+  1000→    let adjustedTakeProfit2 = body.takeProfit2 || 0;
+  1001→    let adjustedTakeProfit3 = body.takeProfit3 || 0;
+  1002→
+  1003→    if (entryType === 'MARKET' && entry > 0 && currentPrice > 0 && Math.abs(currentPrice - entry) / entry > 0.002) {
+  1004→      // Recalculate SL and TP around the actual MARKET entry price, preserving the same distances
+  1005→      const originalRisk = Math.abs(entry - stopLoss);
+  1006→      const originalReward1 = Math.abs(takeProfit1 - entry);
+  1007→      const originalReward2 = Math.abs((body.takeProfit2 || 0) - entry);
+  1008→      const originalReward3 = Math.abs((body.takeProfit3 || 0) - entry);
+  1009→      const direction = body.direction || 'LONG';
+  1010→
+  1011→      if (direction === 'LONG') {
+  1012→        adjustedStopLoss = currentPrice - originalRisk;
+  1013→        adjustedTakeProfit1 = currentPrice + originalReward1;
+  1014→        adjustedTakeProfit2 = currentPrice + originalReward2;
+  1015→        adjustedTakeProfit3 = currentPrice + originalReward3;
+  1016→      } else {
+  1017→        adjustedStopLoss = currentPrice + originalRisk;
+  1018→        adjustedTakeProfit1 = currentPrice - originalReward1;
+  1019→        adjustedTakeProfit2 = currentPrice - originalReward2;
+  1020→        adjustedTakeProfit3 = currentPrice - originalReward3;
+  1021→      }
+  1022→    }
+  1023→
+  1024→    // ===== Kelly Criterion Position Sizing =====
+  1025→    // Use Kelly if we have enough trade history, otherwise fall back to fixed riskPerTrade
+  1026→    const resolvedTrades = data.trades.filter(t => t.resolved && t.result !== 'EXPIRED');
+  1027→    const wins_ = resolvedTrades.filter(t => t.result === 'WIN').length;
+  1028→    const totalResolved_ = resolvedTrades.length;
+  1029→    const winRate = totalResolved_ > 0 ? wins_ / totalResolved_ : 0.5;
+  1030→
+  1031→    // Calculate avg win/loss as % of position size
+  1032→    const winPnls = resolvedTrades.filter(t => t.result === 'WIN' && t.pnlUSDT && t.positionSize > 0).map(t => (t.pnlUSDT / t.positionSize) * 100);
+  1033→    const lossPnls = resolvedTrades.filter(t => t.result === 'LOSS' && t.pnlUSDT && t.positionSize > 0).map(t => Math.abs(t.pnlUSDT / t.positionSize) * 100);
+  1034→    const avgWinPct = winPnls.length > 0 ? winPnls.reduce((a, b) => a + b, 0) / winPnls.length : 3;
+  1035→    const avgLossPct = lossPnls.length > 0 ? lossPnls.reduce((a, b) => a + b, 0) / lossPnls.length : 1.5;
+  1036→
+  1037→    const kelly = kellyCriterion({
+  1038→      winRate,
+  1039→      avgWinPct,
+  1040→      avgLossPct,
+  1041→      maxKellyFraction: 0.25,
+  1042→      currentDrawdownPct,
+  1043→    });
+  1044→
+  1045→    // Use Kelly-recommended risk % if we have enough history, otherwise fall back to default
+  1046→    const effectiveRiskPct = totalResolved_ >= 10 ? kelly.recommendedRiskPct : data.riskPerTrade;
+  1047→
+  1048→    const { positionSize, quantity } = calculatePositionSize(freeBalance, effectiveRiskPct, actualEntry, adjustedStopLoss, effectiveLeverage);
+  1049→
+  1050→    // Don't open if position size would use more than 12% of free balance as margin
+  1051→    if (positionSize > freeBalance * MAX_MARGIN_PCT * effectiveLeverage || positionSize <= 0) {
+  1052→      return NextResponse.json({ success: false, reason: 'insufficient_margin', reputation: data });
+  1053→    }
+  1054→
+  1055→    // Cap position size at risk manager's recommendation
+  1056→    const cappedPositionSize = Math.min(positionSize, riskCheck.maxPositionSize * effectiveLeverage);
+  1057→    const cappedQuantity = actualEntry > 0 ? cappedPositionSize / actualEntry : quantity;
+  1058→    const finalPositionSize = Math.min(positionSize, cappedPositionSize);
+  1059→    const finalQuantity = Math.min(quantity, cappedQuantity);
+  1060→
+  1061→    const newTrade: Trade = {
+  1062→      id: `trade_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+  1063→      coinId,
+  1064→      coinSymbol: body.coinSymbol || 'BTC',
+  1065→      direction: body.direction || 'LONG',
+  1066→      entryType,
+  1067→      entry: actualEntry,
+  1068→      currentPrice: body.currentPrice || 0,
+  1069→      stopLoss: adjustedStopLoss,
+  1070→      takeProfit1: adjustedTakeProfit1,
+  1071→      takeProfit2: adjustedTakeProfit2,
+  1072→      takeProfit3: adjustedTakeProfit3,
+  1073→      confidence,
+  1074→      timeframe: body.timeframe || '1h',
+  1075→      entryReason: body.entryReason || '',
+  1076→      reasons: body.reasons || [],
+  1077→      leverage: effectiveLeverage,
+  1078→      positionSize: finalPositionSize,
+  1079→      quantity: finalQuantity,
+  1080→      timestamp: Date.now(),
+  1081→      entryReached: entryType === 'MARKET',
+  1082→      enteredAt: entryType === 'MARKET' ? Date.now() : null,
+  1083→      resolved: false, result: null, exitPrice: null, exitReason: null,
+  1084→      closedAt: null, pnlUSDT: null, pnlPct: null, pointsChange: null,
+  1085→      // Advanced trading engine fields (optional — disabled by default)
+  1086→      trailingStop: body.trailingStop || false,
+  1087→      trailingStepPct: body.trailingStepPct || 0.01,
+  1088→      highestPrice: actualEntry,
+  1089→      lowestPrice: actualEntry,
+  1090→    };
+  1091→
+  1092→    data.trades.push(newTrade);
+  1093→    data.totalTrades++;
+  1094→    // Lock position size from balance
+  1095→    data.balance = Math.max(0, Math.round((data.balance - finalPositionSize) * 100) / 100);
+  1096→
+  1097→    // Audit: trade opened
+  1098→    auditTradeOpened({ ...newTrade, autoTrade: body.autoTrade ?? false });
+  1099→
+  1100→    const currentPrices = await getCurrentPrices();
+  1101→    const { data: resolved } = resolveTrades(data, currentPrices);
+  1102→    await saveData(resolved);
+  1103→
+  1104→    return NextResponse.json({
+  1105→      success: true,
+  1106→      tradeId: newTrade.id,
+  1107→      entryType, // Tell the frontend what entry type was actually used
+  1108→      adaptiveDecisions: {
+  1109→        usedMarket: shouldUseMarket && body.entryType !== 'MARKET',
+  1110→        reason: shouldUseMarket ? `Рыночный вход: confidence=${confidence}%, priceDiff=${priceDiffFromEntry.toFixed(2)}%, limitExpired=${limitExpiredLessons}` : undefined,
+  1111→      },
+  1112→      engineDecisions: {
+  1113→        kelly: totalResolved_ >= 10 ? {
+  1114→          kellyFraction: kelly.kellyFraction,
+  1115→          adjustedFraction: kelly.adjustedFraction,
+  1116→          recommendedRiskPct: kelly.recommendedRiskPct,
+  1117→          usedRiskPct: effectiveRiskPct,
+  1118→        } : { fallback: true, usedRiskPct: effectiveRiskPct },
+  1119→        riskCheck: {
+  1120→          allowed: riskCheck.allowed,
+  1121→          maxPositionSize: riskCheck.maxPositionSize,
+  1122→          adjustedLeverage: riskCheck.adjustedLeverage,
+  1123→          effectiveLeverage,
+  1124→          drawdownPct: Math.round(currentDrawdownPct * 100) / 100,
+  1125→        },
+  1126→      },
+  1127→      reputation: resolved,
+  1128→    });
+  1129→  } catch (error) {
+  1130→    console.error('Trader POST error:', error);
+  1131→    return NextResponse.json({ error: 'Failed to record trade' }, { status: 500 });
+  1132→  }
+  1133→}
+  1134→
+  1135→// PUT: Deposit funds as credit/loan to the trader
+  1136→export async function PUT(request: Request) {
+  1137→  try {
+  1138→    const body = await request.json();
+  1139→    const amount = Number(body.amount);
+  1140→    if (!amount || amount <= 0) {
+  1141→      return NextResponse.json({ error: 'Invalid amount' }, { status: 400 });
+  1142→    }
+  1143→
+  1144→    const data = await loadData();
+  1145→    const label = body.label || `Кредит #${data.debtHistory.length + 1}`;
+  1146→
+  1147→    data.balance += amount;
+  1148→    data.totalDebt += amount;
+  1149→
+  1150→    data.debtHistory.push({
+  1151→      timestamp: Date.now(),
+  1152→      amount,
+  1153→      remainingOwed: amount,
+  1154→      label,
+  1155→    });
+  1156→
+  1157→    const lockedPositions = data.trades
+  1158→      .filter(t => !t.resolved)
+  1159→      .reduce((sum, t) => sum + t.positionSize, 0);
+  1160→    data.depositHistory.push({
+  1161→      timestamp: Date.now(),
+  1162→      balance: data.balance,
+  1163→      equity: Math.round((data.balance + lockedPositions) * 100) / 100,
+  1164→    });
+  1165→
+  1166→    await saveData(data);
+  1167→
+  1168→    return NextResponse.json({
+  1169→      success: true,
+  1170→      newBalance: data.balance,
+  1171→      totalDebt: data.totalDebt,
+  1172→      debtEntry: { timestamp: Date.now(), amount, remainingOwed: amount, label },
+  1173→    });
+  1174→  } catch (error) {
+  1175→    console.error('Trader PUT error:', error);
+  1176→    return NextResponse.json({ error: 'Failed to deposit' }, { status: 500 });
+  1177→  }
+  1178→}
+  1179→
+  1180→// PATCH: Cancel/delete a specific trade, return its positionSize to balance
+  1181→export async function PATCH(request: Request) {
+  1182→  try {
+  1183→    const body = await request.json();
+  1184→    const tradeId = body.tradeId as string;
+  1185→    if (!tradeId) {
+  1186→      return NextResponse.json({ error: 'tradeId is required' }, { status: 400 });
+  1187→    }
+  1188→
+  1189→    const data = await loadData();
+  1190→    const tradeIndex = data.trades.findIndex(t => t.id === tradeId);
+  1191→    if (tradeIndex === -1) {
+  1192→      return NextResponse.json({ error: 'Trade not found' }, { status: 404 });
+  1193→    }
+  1194→
+  1195→    const trade = data.trades[tradeIndex];
+  1196→    if (trade.resolved) {
+  1197→      return NextResponse.json({ error: 'Cannot delete a resolved trade' }, { status: 400 });
+  1198→    }
+  1199→
+  1200→    let pnlAdjustment = 0;
+  1201→    if (trade.entryReached) {
+  1202→      const currentPrices = await getCurrentPrices();
+  1203→      const currentPrice = currentPrices[trade.coinId];
+  1204→      if (currentPrice) {
+  1205→        pnlAdjustment = calculatePnL(trade, currentPrice);
+  1206→      }
+  1207→    }
+  1208→
+  1209→    const refund = trade.positionSize + pnlAdjustment;
+  1210→    data.balance = Math.max(0, Math.round((data.balance + refund) * 100) / 100);
+  1211→
+  1212→    data.trades.splice(tradeIndex, 1);
+  1213→    data.totalTrades = Math.max(0, data.totalTrades - 1);
+  1214→
+  1215→    // Audit: trade cancelled
+  1216→    auditTradeCancelled(trade, refund);
+  1217→
+  1218→    const currentPrices = await getCurrentPrices();
+  1219→    const { data: resolved } = resolveTrades(data, currentPrices);
+  1220→    await saveData(resolved);
+  1221→
+  1222→    return NextResponse.json({
+  1223→      success: true,
+  1224→      deletedTrade: tradeId,
+  1225→      refunded: Math.round(refund * 100) / 100,
+  1226→      pnlOnClose: Math.round(pnlAdjustment * 100) / 100,
+  1227→      newBalance: resolved.balance,
+  1228→      reputation: resolved,
+  1229→    });
+  1230→  } catch (error) {
+  1231→    console.error('Trader PATCH error:', error);
+  1232→    return NextResponse.json({ error: 'Failed to delete trade' }, { status: 500 });
+  1233→  }
+  1234→}
+  1235→
+  1236→// DELETE: Reset trader data
+  1237→export async function DELETE() {
+  1238→  try {
+  1239→    const defaultData: TraderData = {
+  1240→      initialDeposit: 100, balance: 100,
+  1241→      totalTrades: 0, wins: 0, losses: 0, expired: 0,
+  1242→      score: 0, winRate: 0, avgPnl: 0, streak: 0,
+  1243→      bestTrade: 0, worstTrade: 0, totalPnl: 0,
+  1244→      level: 'Новичок', levelEmoji: '🌱',
+  1245→      riskPerTrade: 5, defaultLeverage: 3,
+  1246→      trades: [],
+  1247→      depositHistory: [{ timestamp: Date.now(), balance: 100, equity: 100 }],
+  1248→      lastUpdated: Date.now(),
+  1249→      totalDebt: 0, debtHistory: [], totalRepaid: 0,
+  1250→      adaptive: { ...DEFAULT_ADAPTIVE, lessons: [] },
+  1251→    };
+  1252→    await saveData(defaultData);
+  1253→    return NextResponse.json({ success: true, reputation: defaultData });
+  1254→  } catch (error) {
+  1255→    return NextResponse.json({ error: 'Failed to reset' }, { status: 500 });
+  1256→  }
+  1257→}
+  1258→

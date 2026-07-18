@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { rateLimit } from '@/lib/rate-limit';
+import { RATE_LIMITS } from '@/lib/api-rate-limits';
 import ZAI from 'z-ai-web-dev-sdk';
 
 const COIN_NAMES: Record<string, string> = {
@@ -51,6 +53,13 @@ const fmtPrice = (p: string | number) => {
 };
 
 export async function GET(request: Request) {
+  const clientIp = request.headers.get('x-forwarded-for') || 'unknown';
+  const { allowed, remaining, resetAt } = rateLimit(`api:advisor:${clientIp}`, RATE_LIMITS.advisor);
+  if (!allowed) {
+    const retryAfter = Math.ceil((resetAt - Date.now()) / 1000);
+    return NextResponse.json({ error: 'Rate limit exceeded', retryAfter }, { status: 429, headers: { 'Retry-After': String(retryAfter) } });
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const coinId = searchParams.get('coin') || 'bitcoin';
@@ -76,7 +85,7 @@ export async function GET(request: Request) {
     const cacheKey = `${coinId}-${direction}-${confidence}-${Math.floor(Date.now() / CACHE_TTL)}`;
     const cached = cache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      return NextResponse.json(cached.data);
+      return NextResponse.json(cached.data, { headers: { 'X-RateLimit-Remaining': String(remaining) } });
     }
 
     const coinName = COIN_NAMES[coinId] || coinId;
@@ -178,7 +187,7 @@ ${newsContext ? `Новости: ${newsContext}` : ''}
       }
     }
 
-    return NextResponse.json(result);
+    return NextResponse.json(result, { headers: { 'X-RateLimit-Remaining': String(remaining) } });
   } catch (error) {
     console.error('Advisor API error:', error);
     return NextResponse.json({ error: 'AI-советчик временно недоступен.' }, { status: 503 });

@@ -1,7 +1,7 @@
 {
   "initialDeposit": 100,
-  "balance": 43.9,
-  "totalTrades": 3,
+  "balance": 76,
+  "totalTrades": 1,
   "wins": 0,
   "losses": 0,
   "expired": 0,
@@ -18,34 +18,33 @@
   "defaultLeverage": 3,
   "trades": [
     {
-      "id": "trade_1784392141847_3ojah1",
-      "coinId": "arbitrum",
-      "coinSymbol": "ARB",
-      "direction": "SHORT",
+      "id": "trade_1784396143782_ijsgu4",
+      "coinId": "binancecoin",
+      "coinSymbol": "BNB",
+      "direction": "LONG",
       "entryType": "LIMIT",
-      "entry": 0.08975971432319944,
-      "currentPrice": 0.0885,
-      "stopLoss": 0.09133138245340285,
-      "takeProfit1": 0.08740221212789434,
-      "takeProfit2": 0.08622346103024178,
-      "takeProfit3": 0.08504470993258924,
-      "confidence": 76,
+      "entry": 569.2787994138058,
+      "currentPrice": 571.39,
+      "stopLoss": 563.5860114196678,
+      "takeProfit1": 577.8179814050129,
+      "takeProfit2": 582.0875724006164,
+      "takeProfit3": 586.35716339622,
+      "confidence": 73,
       "timeframe": "1h",
-      "entryReason": "Откат к EMA21 — динамическое сопротивление",
+      "entryReason": "Откат к EMA21 — динамическая поддержка",
       "reasons": [
-        "Откат к EMA21 — динамическое сопротивление",
-        "Нисходящий тренд подтверждён EMA",
-        "MACD гистограмма падает",
-        "MACD ниже сигнальной",
-        "Старший ТФ подтверждает снижение",
-        "Свечной паттерн: Три чёрные вороны",
-        "Цена ниже VWAP — медвежий настрой",
-        "OBV падает — распределение"
+        "Откат к EMA21 — динамическая поддержка",
+        "Восходящий тренд подтверждён EMA",
+        "MACD выше сигнальной",
+        "Старший ТФ подтверждает рост",
+        "Цена у уровня поддержки — отбой",
+        "Свечной паттерн: Три белых солдата",
+        "OBV растёт — накопление"
       ],
       "leverage": 3,
       "positionSize": 24,
-      "quantity": 267.38053,
-      "timestamp": 1784392141847,
+      "quantity": 0.04215860493085836,
+      "timestamp": 1784396143783,
       "entryReached": false,
       "enteredAt": null,
       "resolved": false,
@@ -55,98 +54,71 @@
       "closedAt": null,
       "pnlUSDT": null,
       "pnlPct": null,
-      "pointsChange": null
-    },
-    {
-      "id": "trade_1784392142605_eeaspu",
-      "coinId": "pepe",
-      "coinSymbol": "PEPE",
-      "direction": "SHORT",
-      "entryType": "MARKET",
-      "entry": 0.00000273,
-      "currentPrice": 0.00000273,
-      "stopLoss": 0.0000027757363360052,
-      "takeProfit1": 0.0000026703578214107916,
-      "takeProfit2": 0.000002638744267032469,
-      "takeProfit3": 0.0000026071307126541466,
-      "confidence": 61,
-      "timeframe": "1h",
-      "entryReason": "Откат к EMA21 — динамическое сопротивление",
-      "reasons": [
-        "Откат к EMA21 — динамическое сопротивление",
-        "Нисходящий тренд подтверждён EMA",
-        "Старший ТФ подтверждает снижение",
-        "Цена ниже VWAP — медвежий настрой"
-      ],
-      "leverage": 3,
-      "positionSize": 18.24,
-      "quantity": 6681318.681319,
-      "timestamp": 1784392142605,
-      "entryReached": true,
-      "enteredAt": 1784392142605,
-      "resolved": false,
-      "result": null,
-      "exitPrice": null,
-      "exitReason": null,
-      "closedAt": null,
-      "pnlUSDT": null,
-      "pnlPct": null,
-      "pointsChange": null
-    },
-    {
-      "id": "trade_1784392143289_dnsrjq",
-      "coinId": "dogecoin",
-      "coinSymbol": "DOGE",
-      "direction": "SHORT",
-      "entryType": "MARKET",
-      "entry": 0.07212,
-      "currentPrice": 0.07212,
-      "stopLoss": 0.07284307794398988,
-      "takeProfit1": 0.07103538308401519,
-      "takeProfit2": 0.07049307462602279,
-      "takeProfit3": 0.06995076616803038,
-      "confidence": 67,
-      "timeframe": "1h",
-      "entryReason": "Откат к EMA21 — динамическое сопротивление",
-      "reasons": [
-        "Откат к EMA21 — динамическое сопротивление",
-        "Нисходящий тренд подтверждён EMA",
-        "MACD гистограмма падает",
-        "MACD ниже сигнальной",
-        "Старший ТФ подтверждает снижение",
-        "Цена у сопротивления — отбой",
-        "Цена ниже VWAP — медвежий настрой",
-        "OBV падает — распределение"
-      ],
-      "leverage": 3,
-      "positionSize": 13.86,
-      "quantity": 192.212978,
-      "timestamp": 1784392143289,
-      "entryReached": true,
-      "enteredAt": 1784392143289,
-      "resolved": false,
-      "result": null,
-      "exitPrice": null,
-      "exitReason": null,
-      "closedAt": null,
-      "pnlUSDT": null,
-      "pnlPct": null,
-      "pointsChange": null
+      "pointsChange": null,
+      "trailingStop": false,
+      "trailingStepPct": 0.01,
+      "highestPrice": 569.2787994138058,
+      "lowestPrice": 569.2787994138058
     }
   ],
   "depositHistory": [
     {
-      "timestamp": 1784385600000,
+      "timestamp": 1784396143772,
       "balance": 100,
       "equity": 100
     },
     {
-      "timestamp": 1784392138618,
-      "balance": 100,
+      "timestamp": 1784396477711,
+      "balance": 76,
+      "equity": 100
+    },
+    {
+      "timestamp": 1784396839337,
+      "balance": 76,
+      "equity": 100
+    },
+    {
+      "timestamp": 1784397542626,
+      "balance": 76,
+      "equity": 100
+    },
+    {
+      "timestamp": 1784398058991,
+      "balance": 76,
+      "equity": 100
+    },
+    {
+      "timestamp": 1784398435785,
+      "balance": 76,
+      "equity": 100
+    },
+    {
+      "timestamp": 1784398978202,
+      "balance": 76,
+      "equity": 100
+    },
+    {
+      "timestamp": 1784399305413,
+      "balance": 76,
+      "equity": 100
+    },
+    {
+      "timestamp": 1784399672982,
+      "balance": 76,
+      "equity": 100
+    },
+    {
+      "timestamp": 1784400034389,
+      "balance": 76,
+      "equity": 100
+    },
+    {
+      "timestamp": 1784400354434,
+      "balance": 76,
       "equity": 100
     }
   ],
-  "lastUpdated": 1784392186188,
+  "lastUpdated": 1784400358553,
   "totalDebt": 0,
   "debtHistory": [],
   "totalRepaid": 0,

@@ -1,0 +1,1409 @@
+     1→     1→// Professional Intraday Trading Analysis Engine v2
+     2→     2→// Focus: 1m, 5m, 15m, 1h, 4h timeframes for intraday and 1-3 day trades
+     3→     3→// Key improvement: More aggressive signal generation with candlestick patterns, VWAP, volume spikes
+     4→     4→
+     5→     5→export interface OHLCV {
+     6→     6→  timestamp: number;
+     7→     7→  open: number;
+     8→     8→  high: number;
+     9→     9→  low: number;
+    10→    10→  close: number;
+    11→    11→  volume: number;
+    12→    12→}
+    13→    13→
+    14→    14→export interface TradeSignal {
+    15→    15→  direction: 'LONG' | 'SHORT' | 'FLAT';
+    16→    16→  confidence: number; // 0-100
+    17→    17→  entry: number;
+    18→    18→  entryType: 'LIMIT' | 'MARKET'; // LIMIT = wait for pullback, MARKET = enter now
+    19→    19→  entryReason: string; // Why this entry level was chosen
+    20→    20→  stopLoss: number;
+    21→    21→  takeProfit1: number; // conservative (1.5-2 R)
+    22→    22→  takeProfit2: number; // moderate (2.5-3 R)
+    23→    23→  takeProfit3: number; // aggressive (4-5 R)
+    24→    24→  riskReward: number;
+    25→    25→  holdDuration: string; // e.g. "2-4 часа", "1-2 дня"
+    26→    26→  holdDurationHours: number;
+    27→    27→  reasons: string[];
+    28→    28→  warnings: string[];
+    29→    29→  indicators: IndicatorResult[];
+    30→    30→  multiTimeframe: MultiTimeframeResult;
+    31→    31→  currentPrice: number;
+    32→    32→  atr: number;
+    33→    33→  support: number;
+    34→    34→  resistance: number;
+    35→    35→  trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+    36→    36→  momentum: 'STRONG' | 'MODERATE' | 'WEAK';
+    37→    37→  candlePattern: string | null;
+    38→    38→  volumeSignal: string | null;
+    39→    39→}
+    40→    40→
+    41→    41→export interface IndicatorResult {
+    42→    42→  name: string;
+    43→    43→  value: number | string;
+    44→    44→  signal: 'BUY' | 'SELL' | 'NEUTRAL';
+    45→    45→  description: string;
+    46→    46→  weight: number;
+    47→    47→}
+    48→    48→
+    49→    49→export interface MultiTimeframeResult {
+    50→    50→  m5?: TimeframeVerdict;
+    51→    51→  m15?: TimeframeVerdict;
+    52→    52→  h1?: TimeframeVerdict;
+    53→    53→  h4?: TimeframeVerdict;
+    54→    54→  consensus: 'STRONG_LONG' | 'LONG' | 'NEUTRAL' | 'SHORT' | 'STRONG_SHORT';
+    55→    55→  alignment: number; // 0-100, how aligned timeframes are
+    56→    56→}
+    57→    57→
+    58→    58→export interface TimeframeVerdict {
+    59→    59→  direction: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+    60→    60→  score: number; // -100 to +100
+    61→    61→  trend: string;
+    62→    62→  keyLevel: string;
+    63→    63→}
+    64→    64→
+    65→    65→export interface SignalResult {
+    66→    66→  type: 'BUY' | 'SELL' | 'HOLD';
+    67→    67→  strength: number;
+    68→    68→  indicators: IndicatorResult[];
+    69→    69→  summary: string;
+    70→    70→  forecast?: PriceForecast;
+    71→    71→  tradeSignal?: TradeSignal;
+    72→    72→}
+    73→    73→
+    74→    74→export interface PriceForecast {
+    75→    75→  direction: 'UP' | 'DOWN' | 'SIDEWAYS';
+    76→    76→  confidence: number;
+    77→    77→  targetPrice: number;
+    78→    78→  supportLevel: number;
+    79→    79→  resistanceLevel: number;
+    80→    80→  shortTerm: string;
+    81→    81→  mediumTerm: string;
+    82→    82→  longTerm: string;
+    83→    83→}
+    84→    84→
+    85→    85→// ============================================
+    86→    86→// BASIC INDICATORS
+    87→    87→// ============================================
+    88→    88→
+    89→    89→export function SMA(data: number[], period: number): number[] {
+    90→    90→  const result: number[] = [];
+    91→    91→  for (let i = 0; i < data.length; i++) {
+    92→    92→    if (i < period - 1) { result.push(NaN); continue; }
+    93→    93→    let sum = 0;
+    94→    94→    for (let j = i - period + 1; j <= i; j++) { sum += data[j]; }
+    95→    95→    result.push(sum / period);
+    96→    96→  }
+    97→    97→  return result;
+    98→    98→}
+    99→    99→
+   100→   100→export function EMA(data: number[], period: number): number[] {
+   101→   101→  const result: number[] = [];
+   102→   102→  const multiplier = 2 / (period + 1);
+   103→   103→  let sum = 0;
+   104→   104→  for (let i = 0; i < period; i++) {
+   105→   105→    sum += data[i];
+   106→   106→    result.push(NaN);
+   107→   107→  }
+   108→   108→  result[period - 1] = sum / period;
+   109→   109→  for (let i = period; i < data.length; i++) {
+   110→   110→    result.push((data[i] - result[i - 1]) * multiplier + result[i - 1]);
+   111→   111→  }
+   112→   112→  return result;
+   113→   113→}
+   114→   114→
+   115→   115→export function RSI(closes: number[], period: number = 14): number[] {
+   116→   116→  const result: number[] = [];
+   117→   117→  const gains: number[] = [];
+   118→   118→  const losses: number[] = [];
+   119→   119→  for (let i = 0; i < closes.length; i++) {
+   120→   120→    if (i === 0) { gains.push(0); losses.push(0); result.push(NaN); continue; }
+   121→   121→    const change = closes[i] - closes[i - 1];
+   122→   122→    gains.push(change > 0 ? change : 0);
+   123→   123→    losses.push(change < 0 ? Math.abs(change) : 0);
+   124→   124→    if (i < period) { result.push(NaN); continue; }
+   125→   125→    let avgGain = gains.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0) / period;
+   126→   126→    let avgLoss = losses.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0) / period;
+   127→   127→    if (avgLoss === 0) { result.push(100); } else { result.push(100 - 100 / (1 + avgGain / avgLoss)); }
+   128→   128→  }
+   129→   129→  return result;
+   130→   130→}
+   131→   131→
+   132→   132→export function MACD(closes: number[], fastPeriod: number = 12, slowPeriod: number = 26, signalPeriod: number = 9): { macd: number[]; signal: number[]; histogram: number[] } {
+   133→   133→  const fastEMA = EMA(closes, fastPeriod);
+   134→   134→  const slowEMA = EMA(closes, slowPeriod);
+   135→   135→  const macdLine: number[] = [];
+   136→   136→  for (let i = 0; i < closes.length; i++) {
+   137→   137→    macdLine.push(isNaN(fastEMA[i]) || isNaN(slowEMA[i]) ? NaN : fastEMA[i] - slowEMA[i]);
+   138→   138→  }
+   139→   139→  const validMacd = macdLine.filter(v => !isNaN(v));
+   140→   140→  const signalLine = EMA(validMacd, signalPeriod);
+   141→   141→  const fullSignal: number[] = [];
+   142→   142→  let vIdx = 0;
+   143→   143→  for (let i = 0; i < macdLine.length; i++) {
+   144→   144→    if (isNaN(macdLine[i])) { fullSignal.push(NaN); } else { fullSignal.push(signalLine[vIdx] || NaN); vIdx++; }
+   145→   145→  }
+   146→   146→  const histogram: number[] = macdLine.map((m, i) => isNaN(m) || isNaN(fullSignal[i]) ? NaN : m - fullSignal[i]);
+   147→   147→  return { macd: macdLine, signal: fullSignal, histogram };
+   148→   148→}
+   149→   149→
+   150→   150→export function BollingerBands(closes: number[], period: number = 20, stdDev: number = 2): { upper: number[]; middle: number[]; lower: number[] } {
+   151→   151→  const middle = SMA(closes, period);
+   152→   152→  const upper: number[] = [];
+   153→   153→  const lower: number[] = [];
+   154→   154→  for (let i = 0; i < closes.length; i++) {
+   155→   155→    if (isNaN(middle[i])) { upper.push(NaN); lower.push(NaN); continue; }
+   156→   156→    let sumSq = 0;
+   157→   157→    for (let j = i - period + 1; j <= i; j++) { sumSq += Math.pow(closes[j] - middle[i], 2); }
+   158→   158→    const sd = Math.sqrt(sumSq / period);
+   159→   159→    upper.push(middle[i] + stdDev * sd);
+   160→   160→    lower.push(middle[i] - stdDev * sd);
+   161→   161→  }
+   162→   162→  return { upper, middle, lower };
+   163→   163→}
+   164→   164→
+   165→   165→export function Stochastic(highs: number[], lows: number[], closes: number[], kPeriod: number = 14, dPeriod: number = 3): { k: number[]; d: number[] } {
+   166→   166→  const k: number[] = [];
+   167→   167→  for (let i = 0; i < closes.length; i++) {
+   168→   168→    if (i < kPeriod - 1) { k.push(NaN); continue; }
+   169→   169→    let hh = -Infinity, ll = Infinity;
+   170→   170→    for (let j = i - kPeriod + 1; j <= i; j++) { if (highs[j] > hh) hh = highs[j]; if (lows[j] < ll) ll = lows[j]; }
+   171→   171→    k.push(hh === ll ? 50 : ((closes[i] - ll) / (hh - ll)) * 100);
+   172→   172→  }
+   173→   173→  const validK = k.filter(v => !isNaN(v));
+   174→   174→  const dRaw = SMA(validK, dPeriod);
+   175→   175→  const d: number[] = [];
+   176→   176→  let vi = 0;
+   177→   177→  for (let i = 0; i < k.length; i++) { if (isNaN(k[i])) { d.push(NaN); } else { d.push(dRaw[vi] || NaN); vi++; } }
+   178→   178→  return { k, d };
+   179→   179→}
+   180→   180→
+   181→   181→export function ATR(highs: number[], lows: number[], closes: number[], period: number = 14): number[] {
+   182→   182→  const tr: number[] = [];
+   183→   183→  const result: number[] = [];
+   184→   184→  for (let i = 0; i < closes.length; i++) {
+   185→   185→    if (i === 0) tr.push(highs[i] - lows[i]);
+   186→   186→    else tr.push(Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i - 1]), Math.abs(lows[i] - closes[i - 1])));
+   187→   187→  }
+   188→   188→  for (let i = 0; i < tr.length; i++) {
+   189→   189→    if (i < period - 1) result.push(NaN);
+   190→   190→    else if (i === period - 1) result.push(tr.slice(0, period).reduce((a, b) => a + b, 0) / period);
+   191→   191→    else result.push((result[i - 1] * (period - 1) + tr[i]) / period);
+   192→   192→  }
+   193→   193→  return result;
+   194→   194→}
+   195→   195→
+   196→   196→export function VWAP(data: OHLCV[]): number[] {
+   197→   197→  const result: number[] = [];
+   198→   198→  let cumTPV = 0, cumVol = 0;
+   199→   199→  for (const c of data) {
+   200→   200→    const tp = (c.high + c.low + c.close) / 3;
+   201→   201→    cumTPV += tp * c.volume;
+   202→   202→    cumVol += c.volume;
+   203→   203→    result.push(cumVol === 0 ? c.close : cumTPV / cumVol);
+   204→   204→  }
+   205→   205→  return result;
+   206→   206→}
+   207→   207→
+   208→   208→export function ADX(highs: number[], lows: number[], closes: number[], period: number = 14): number[] {
+   209→   209→  const plusDM: number[] = [], minusDM: number[] = [], tr: number[] = [];
+   210→   210→  for (let i = 0; i < closes.length; i++) {
+   211→   211→    if (i === 0) { plusDM.push(0); minusDM.push(0); tr.push(highs[i] - lows[i]); continue; }
+   212→   212→    const up = highs[i] - highs[i - 1], down = lows[i - 1] - lows[i];
+   213→   213→    plusDM.push(up > down && up > 0 ? up : 0);
+   214→   214→    minusDM.push(down > up && down > 0 ? down : 0);
+   215→   215→    tr.push(Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i - 1]), Math.abs(lows[i] - closes[i - 1])));
+   216→   216→  }
+   217→   217→  const sTR = smoothWilder(tr, period), sPDM = smoothWilder(plusDM, period), sMDM = smoothWilder(minusDM, period);
+   218→   218→  const plusDI: number[] = [], minusDI: number[] = [], dx: number[] = [];
+   219→   219→  for (let i = 0; i < closes.length; i++) {
+   220→   220→    plusDI.push(!isNaN(sTR[i]) && sTR[i] !== 0 ? (sPDM[i] / sTR[i]) * 100 : 0);
+   221→   221→    minusDI.push(!isNaN(sTR[i]) && sTR[i] !== 0 ? (sMDM[i] / sTR[i]) * 100 : 0);
+   222→   222→    const diSum = plusDI[i] + minusDI[i];
+   223→   223→    dx.push(diSum === 0 ? 0 : (Math.abs(plusDI[i] - minusDI[i]) / diSum) * 100);
+   224→   224→  }
+   225→   225→  return smoothWilder(dx, period);
+   226→   226→}
+   227→   227→
+   228→   228→function smoothWilder(data: number[], period: number): number[] {
+   229→   229→  const result: number[] = [];
+   230→   230→  for (let i = 0; i < data.length; i++) {
+   231→   231→    if (i < period - 1) result.push(NaN);
+   232→   232→    else if (i === period - 1) result.push(data.slice(0, period).reduce((a, b) => a + b, 0) / period);
+   233→   233→    else result.push(!isNaN(result[i - 1]) ? (result[i - 1] * (period - 1) + data[i]) / period : data[i]);
+   234→   234→  }
+   235→   235→  return result;
+   236→   236→}
+   237→   237→
+   238→   238→export function OBV(closes: number[], volumes: number[]): number[] {
+   239→   239→  const result: number[] = [0];
+   240→   240→  for (let i = 1; i < closes.length; i++) {
+   241→   241→    if (closes[i] > closes[i - 1]) result.push(result[i - 1] + volumes[i]);
+   242→   242→    else if (closes[i] < closes[i - 1]) result.push(result[i - 1] - volumes[i]);
+   243→   243→    else result.push(result[i - 1]);
+   244→   244→  }
+   245→   245→  return result;
+   246→   246→}
+   247→   247→
+   248→   248→// ============================================
+   249→   249→// CANDLESTICK PATTERN RECOGNITION (NEW!)
+   250→   250→// ============================================
+   251→   251→
+   252→   252→export interface CandlePattern {
+   253→   253→  name: string;
+   254→   254→  signal: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+   255→   255→  strength: number; // 1-10
+   256→   256→  description: string;
+   257→   257→}
+   258→   258→
+   259→   259→export function detectCandlePatterns(data: OHLCV[]): CandlePattern | null {
+   260→   260→  if (data.length < 5) return null;
+   261→   261→
+   262→   262→  const last = data[data.length - 1];
+   263→   263→  const prev = data[data.length - 2];
+   264→   264→  const prev2 = data[data.length - 3];
+   265→   265→
+   266→   266→  const bodySize = Math.abs(last.close - last.open);
+   267→   267→  const totalRange = last.high - last.low;
+   268→   268→  const upperWick = last.high - Math.max(last.open, last.close);
+   269→   269→  const lowerWick = Math.min(last.open, last.close) - last.low;
+   270→   270→  const isGreen = last.close > last.open;
+   271→   271→  const isRed = last.close < last.open;
+   272→   272→
+   273→   273→  const prevBodySize = Math.abs(prev.close - prev.open);
+   274→   274→  const prevIsGreen = prev.close > prev.open;
+   275→   275→  const prevIsRed = prev.close < prev.open;
+   276→   276→
+   277→   277→  const avgBody = data.slice(-10).reduce((s, d) => s + Math.abs(d.close - d.open), 0) / 10;
+   278→   278→
+   279→   279→  // 1. Hammer / Inverted Hammer (bullish reversal)
+   280→   280→  if (lowerWick > bodySize * 2 && upperWick < bodySize * 0.5 && totalRange > 0 && isRed === false) {
+   281→   281→    return { name: 'Молот', signal: 'BULLISH', strength: 7, description: 'Бычий разворот — длинная нижняя тень' };
+   282→   282→  }
+   283→   283→
+   284→   284→  // 2. Shooting Star (bearish reversal)
+   285→   285→  if (upperWick > bodySize * 2 && lowerWick < bodySize * 0.5 && totalRange > 0) {
+   286→   286→    return { name: 'Падающая звезда', signal: 'BEARISH', strength: 7, description: 'Медвежий разворот — длинная верхняя тень' };
+   287→   287→  }
+   288→   288→
+   289→   289→  // 3. Bullish Engulfing
+   290→   290→  if (prevIsRed && isGreen && last.open <= prev.close && last.close >= prev.open && bodySize > prevBodySize) {
+   291→   291→    return { name: 'Бычье поглощение', signal: 'BULLISH', strength: 8, description: 'Зелёная свеча поглотила красную — сильный бычий сигнал' };
+   292→   292→  }
+   293→   293→
+   294→   294→  // 4. Bearish Engulfing
+   295→   295→  if (prevIsGreen && isRed && last.open >= prev.close && last.close <= prev.open && bodySize > prevBodySize) {
+   296→   296→    return { name: 'Медвежье поглощение', signal: 'BEARISH', strength: 8, description: 'Красная свеча поглотила зелёную — сильный медвежий сигнал' };
+   297→   297→  }
+   298→   298→
+   299→   299→  // 5. Doji (indecision)
+   300→   300→  if (totalRange > 0 && bodySize / totalRange < 0.1) {
+   301→   301→    return { name: 'Доджи', signal: 'NEUTRAL', strength: 3, description: 'Нерешительность рынка — возможен разворот' };
+   302→   302→  }
+   303→   303→
+   304→   304→  // 6. Dragonfly Doji (bullish)
+   305→   305→  if (totalRange > 0 && bodySize / totalRange < 0.15 && lowerWick > totalRange * 0.6 && upperWick < totalRange * 0.1) {
+   306→   306→    return { name: 'Стрекоза', signal: 'BULLISH', strength: 6, description: 'Бычий доджи — давление покупателей' };
+   307→   307→  }
+   308→   308→
+   309→   309→  // 7. Gravestone Doji (bearish)
+   310→   310→  if (totalRange > 0 && bodySize / totalRange < 0.15 && upperWick > totalRange * 0.6 && lowerWick < totalRange * 0.1) {
+   311→   311→    return { name: 'Надгробие', signal: 'BEARISH', strength: 6, description: 'Медвежий доджи — давление продавцов' };
+   312→   312→  }
+   313→   313→
+   314→   314→  // 8. Morning Star (3-candle bullish reversal)
+   315→   315→  if (data.length >= 3) {
+   316→   316→    const c1 = data[data.length - 3];
+   317→   317→    const c2 = data[data.length - 2];
+   318→   318→    const c3 = data[data.length - 1];
+   319→   319→    const c1Red = c1.close < c1.open;
+   320→   320→    const c3Green = c3.close > c3.open;
+   321→   321→    const c2Small = Math.abs(c2.close - c2.open) < Math.abs(c1.close - c1.open) * 0.3;
+   322→   322→    if (c1Red && c2Small && c3Green && c3.close > (c1.open + c1.close) / 2) {
+   323→   323→      return { name: 'Утренняя звезда', signal: 'BULLISH', strength: 9, description: 'Трёхсвечевый бычий разворот' };
+   324→   324→    }
+   325→   325→  }
+   326→   326→
+   327→   327→  // 9. Evening Star (3-candle bearish reversal)
+   328→   328→  if (data.length >= 3) {
+   329→   329→    const c1 = data[data.length - 3];
+   330→   330→    const c2 = data[data.length - 2];
+   331→   331→    const c3 = data[data.length - 1];
+   332→   332→    const c1Green = c1.close > c1.open;
+   333→   333→    const c3Red = c3.close < c3.open;
+   334→   334→    const c2Small = Math.abs(c2.close - c2.open) < Math.abs(c1.close - c1.open) * 0.3;
+   335→   335→    if (c1Green && c2Small && c3Red && c3.close < (c1.open + c1.close) / 2) {
+   336→   336→      return { name: 'Вечерняя звезда', signal: 'BEARISH', strength: 9, description: 'Трёхсвечевый медвежий разворот' };
+   337→   337→    }
+   338→   338→  }
+   339→   339→
+   340→   340→  // 10. Pin Bar (bullish)
+   341→   341→  if (lowerWick > bodySize * 2.5 && lowerWick > upperWick * 3 && totalRange > avgBody * 0.8) {
+   342→   342→    return { name: 'Пин-бар бычий', signal: 'BULLISH', strength: 8, description: 'Отказ от нижних цен — бычий пин-бар' };
+   343→   343→  }
+   344→   344→
+   345→   345→  // 11. Pin Bar (bearish)
+   346→   346→  if (upperWick > bodySize * 2.5 && upperWick > lowerWick * 3 && totalRange > avgBody * 0.8) {
+   347→   347→    return { name: 'Пин-бар медвежий', signal: 'BEARISH', strength: 8, description: 'Отказ от верхних цен — медвежий пин-бар' };
+   348→   348→  }
+   349→   349→
+   350→   350→  // 12. Three White Soldiers
+   351→   351→  if (data.length >= 3) {
+   352→   352→    const last3 = data.slice(-3);
+   353→   353→    if (last3.every(d => d.close > d.open) &&
+   354→   354→        last3[1].close > last3[0].close && last3[2].close > last3[1].close) {
+   355→   355→      return { name: 'Три белых солдата', signal: 'BULLISH', strength: 8, description: 'Три растущие свечи — сильный бычий тренд' };
+   356→   356→    }
+   357→   357→  }
+   358→   358→
+   359→   359→  // 13. Three Black Crows
+   360→   360→  if (data.length >= 3) {
+   361→   361→    const last3 = data.slice(-3);
+   362→   362→    if (last3.every(d => d.close < d.open) &&
+   363→   363→        last3[1].close < last3[0].close && last3[2].close < last3[1].close) {
+   364→   364→      return { name: 'Три чёрные вороны', signal: 'BEARISH', strength: 8, description: 'Три падающие свечи — сильный медвежий тренд' };
+   365→   365→    }
+   366→   366→  }
+   367→   367→
+   368→   368→  // 14. Large body candle (momentum)
+   369→   369→  if (bodySize > avgBody * 2.5) {
+   370→   370→    if (isGreen) {
+   371→   371→      return { name: 'Сильная бычья', signal: 'BULLISH', strength: 6, description: `Тело в ${(bodySize / avgBody).toFixed(1)}x больше среднего — импульс` };
+   372→   372→    } else {
+   373→   373→      return { name: 'Сильная медвежья', signal: 'BEARISH', strength: 6, description: `Тело в ${(bodySize / avgBody).toFixed(1)}x больше среднего — импульс` };
+   374→   374→    }
+   375→   375→  }
+   376→   376→
+   377→   377→  return null;
+   378→   378→}
+   379→   379→
+   380→   380→// ============================================
+   381→   381→// VOLUME ANALYSIS (NEW!)
+   382→   382→// ============================================
+   383→   383→
+   384→   384→export interface VolumeAnalysis {
+   385→   385→  signal: string | null;
+   386→   386→  isVolumeSpike: boolean;
+   387→   387→  volumeRatio: number;
+   388→   388→  obvTrend: 'RISING' | 'FALLING' | 'FLAT';
+   389→   389→  vwapPosition: 'ABOVE' | 'BELOW' | 'AT';
+   390→   390→  description: string;
+   391→   391→}
+   392→   392→
+   393→   393→export function analyzeVolume(data: OHLCV[]): VolumeAnalysis {
+   394→   394→  if (data.length < 20) {
+   395→   395→    return { signal: null, isVolumeSpike: false, volumeRatio: 1, obvTrend: 'FLAT', vwapPosition: 'AT', description: 'Недостаточно данных' };
+   396→   396→  }
+   397→   397→
+   398→   398→  const closes = data.map(d => d.close);
+   399→   399→  const volumes = data.map(d => d.volume);
+   400→   400→  const currentPrice = closes[closes.length - 1];
+   401→   401→
+   402→   402→  // Volume spike detection
+   403→   403→  const avgVol20 = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+   404→   404→  const lastVol = volumes[volumes.length - 1];
+   405→   405→  const volumeRatio = avgVol20 > 0 ? lastVol / avgVol20 : 1;
+   406→   406→  const isVolumeSpike = volumeRatio > 2.0;
+   407→   407→
+   408→   408→  // OBV trend
+   409→   409→  const obv = OBV(closes, volumes);
+   410→   410→  const obvRecent = obv.slice(-10);
+   411→   411→  const obvTrend: 'RISING' | 'FALLING' | 'FLAT' =
+   412→   412→    obvRecent[obvRecent.length - 1] > obvRecent[0] * 1.01 ? 'RISING' :
+   413→   413→    obvRecent[obvRecent.length - 1] < obvRecent[0] * 0.99 ? 'FALLING' : 'FLAT';
+   414→   414→
+   415→   415→  // VWAP position
+   416→   416→  const vwap = VWAP(data);
+   417→   417→  const lastVwap = vwap[vwap.length - 1];
+   418→   418→  const vwapPosition: 'ABOVE' | 'BELOW' | 'AT' =
+   419→   419→    currentPrice > lastVwap * 1.002 ? 'ABOVE' :
+   420→   420→    currentPrice < lastVwap * 0.998 ? 'BELOW' : 'AT';
+   421→   421→
+   422→   422→  // Signal description
+   423→   423→  let signal: string | null = null;
+   424→   424→  let description = '';
+   425→   425→
+   426→   426→  if (isVolumeSpike) {
+   427→   427→    const priceUp = closes[closes.length - 1] > closes[closes.length - 2];
+   428→   428→    if (priceUp && obvTrend === 'RISING') {
+   429→   429→      signal = 'BULLISH_VOLUME_SPIKE';
+   430→   430→      description = `Объём x${volumeRatio.toFixed(1)} + рост OBV — сильное давление покупателей`;
+   431→   431→    } else if (!priceUp && obvTrend === 'FALLING') {
+   432→   432→      signal = 'BEARISH_VOLUME_SPIKE';
+   433→   433→      description = `Объём x${volumeRatio.toFixed(1)} + падение OBV — сильное давление продавцов`;
+   434→   434→    } else {
+   435→   435→      signal = 'HIGH_VOLUME';
+   436→   436→      description = `Аномальный объём x${volumeRatio.toFixed(1)} — возможен разворот`;
+   437→   437→    }
+   438→   438→  }
+   439→   439→
+   440→   440→  if (vwapPosition === 'ABOVE' && signal === null) {
+   441→   441→    signal = 'ABOVE_VWAP';
+   442→   442→    description = 'Цена выше VWAP — бычий настрой внутридневных игроков';
+   443→   443→  } else if (vwapPosition === 'BELOW' && signal === null) {
+   444→   444→    signal = 'BELOW_VWAP';
+   445→   445→    description = 'Цена ниже VWAP — медвежий настрой внутридневных игроков';
+   446→   446→  }
+   447→   447→
+   448→   448→  if (!signal) {
+   449→   449→    description = `Объём x${volumeRatio.toFixed(1)} | OBV: ${obvTrend === 'RISING' ? '↑' : obvTrend === 'FALLING' ? '↓' : '→'} | VWAP: ${vwapPosition === 'ABOVE' ? 'выше' : vwapPosition === 'BELOW' ? 'ниже' : 'на'}`;
+   450→   450→  }
+   451→   451→
+   452→   452→  return { signal, isVolumeSpike, volumeRatio, obvTrend, vwapPosition, description };
+   453→   453→}
+   454→   454→
+   455→   455→// ============================================
+   456→   456→// SWING POINT DETECTION (for stop-loss placement)
+   457→   457→// ============================================
+   458→   458→
+   459→   459→/** Find the most recent swing low — a candle whose low is lower than N candles on each side */
+   460→   460→export function findLastSwingLow(data: OHLCV[], lookback: number = 5): number {
+   461→   461→  if (data.length < lookback * 2 + 1) {
+   462→   462→    return data.length > 0 ? Math.min(...data.slice(-20).map(d => d.low)) : 0;
+   463→   463→  }
+   464→   464→  const recent = data.slice(-(lookback * 4)); // Look in the last ~20 candles
+   465→   465→  for (let i = recent.length - 1; i >= lookback; i--) {
+   466→   466→    let isSwing = true;
+   467→   467→    for (let j = 1; j <= lookback; j++) {
+   468→   468→      if (recent[i].low >= recent[i - j].low || recent[i].low >= recent[Math.min(i + j, recent.length - 1)].low) {
+   469→   469→        isSwing = false;
+   470→   470→        break;
+   471→   471→      }
+   472→   472→    }
+   473→   473→    if (isSwing) return recent[i].low;
+   474→   474→  }
+   475→   475→  // Fallback: lowest low of recent data
+   476→   476→  return Math.min(...data.slice(-20).map(d => d.low));
+   477→   477→}
+   478→   478→
+   479→   479→/** Find the most recent swing high — a candle whose high is higher than N candles on each side */
+   480→   480→export function findLastSwingHigh(data: OHLCV[], lookback: number = 5): number {
+   481→   481→  if (data.length < lookback * 2 + 1) {
+   482→   482→    return data.length > 0 ? Math.max(...data.slice(-20).map(d => d.high)) : 0;
+   483→   483→  }
+   484→   484→  const recent = data.slice(-(lookback * 4));
+   485→   485→  for (let i = recent.length - 1; i >= lookback; i--) {
+   486→   486→    let isSwing = true;
+   487→   487→    for (let j = 1; j <= lookback; j++) {
+   488→   488→      if (recent[i].high <= recent[i - j].high || recent[i].high <= recent[Math.min(i + j, recent.length - 1)].high) {
+   489→   489→        isSwing = false;
+   490→   490→        break;
+   491→   491→      }
+   492→   492→    }
+   493→   493→    if (isSwing) return recent[i].high;
+   494→   494→  }
+   495→   495→  return Math.max(...data.slice(-20).map(d => d.high));
+   496→   496→}
+   497→   497→
+   498→   498→// ============================================
+   499→   499→// ADVANCED LEVEL DETECTION
+   500→   500→// ============================================
+   501→   501→
+   502→   502→export function findKeyLevels(data: OHLCV[]): {
+   503→   503→  supports: number[]; resistances: number[];
+   504→   504→  pivot: number; nearestSupport: number; nearestResistance: number;
+   505→   505→} {
+   506→   506→  if (data.length < 5) return { supports: [], resistances: [], pivot: 0, nearestSupport: 0, nearestResistance: 0 };
+   507→   507→
+   508→   508→  const currentPrice = data[data.length - 1].close;
+   509→   509→  const recent = data.slice(-50);
+   510→   510→
+   511→   511→  // Find swing highs and swing lows
+   512→   512→  const swingHighs: number[] = [];
+   513→   513→  const swingLows: number[] = [];
+   514→   514→
+   515→   515→  for (let i = 2; i < recent.length - 2; i++) {
+   516→   516→    if (recent[i].high > recent[i - 1].high && recent[i].high > recent[i - 2].high &&
+   517→   517→        recent[i].high > recent[i + 1].high && recent[i].high > recent[i + 2].high) {
+   518→   518→      swingHighs.push(recent[i].high);
+   519→   519→    }
+   520→   520→    if (recent[i].low < recent[i - 1].low && recent[i].low < recent[i - 2].low &&
+   521→   521→        recent[i].low < recent[i + 1].low && recent[i].low < recent[i + 2].low) {
+   522→   522→      swingLows.push(recent[i].low);
+   523→   523→    }
+   524→   524→  }
+   525→   525→
+   526→   526→  // Cluster nearby levels (within 0.3% of each other)
+   527→   527→  const clusterLevels = (levels: number[]): number[] => {
+   528→   528→    if (levels.length === 0) return [];
+   529→   529→    const sorted = [...levels].sort((a, b) => a - b);
+   530→   530→    const clusters: number[][] = [[sorted[0]]];
+   531→   531→    for (let i = 1; i < sorted.length; i++) {
+   532→   532→      const lastCluster = clusters[clusters.length - 1];
+   533→   533→      const avg = lastCluster.reduce((a, b) => a + b, 0) / lastCluster.length;
+   534→   534→      if (Math.abs(sorted[i] - avg) / avg < 0.003) {
+   535→   535→        lastCluster.push(sorted[i]);
+   536→   536→      } else {
+   537→   537→        clusters.push([sorted[i]]);
+   538→   538→      }
+   539→   539→    }
+   540→   540→    return clusters.map(c => c.reduce((a, b) => a + b, 0) / c.length).sort((a, b) => a - b);
+   541→   541→  };
+   542→   542→
+   543→   543→  const supports = clusterLevels(swingLows.filter(l => l < currentPrice)).reverse();
+   544→   544→  const resistances = clusterLevels(swingHighs.filter(h => h > currentPrice));
+   545→   545→
+   546→   546→  const lastCandle = recent[recent.length - 1];
+   547→   547→  const pivot = (lastCandle.high + lastCandle.low + lastCandle.close) / 3;
+   548→   548→
+   549→   549→  const nearestSupport = supports.length > 0 ? supports[0] : pivot * 0.97;
+   550→   550→  const nearestResistance = resistances.length > 0 ? resistances[0] : pivot * 1.03;
+   551→   551→
+   552→   552→  return { supports, resistances, pivot, nearestSupport, nearestResistance };
+   553→   553→}
+   554→   554→
+   555→   555→// ============================================
+   556→   556→// SINGLE TIMEFRAME ANALYSIS (IMPROVED — MORE SENSITIVE)
+   557→   557→// ============================================
+   558→   558→
+   559→   559→export function analyzeTimeframe(data: OHLCV[]): TimeframeVerdict {
+   560→   560→  if (data.length < 20) return { direction: 'NEUTRAL', score: 0, trend: 'Недостаточно данных', keyLevel: '—' };
+   561→   561→
+   562→   562→  const closes = data.map(d => d.close);
+   563→   563→  const highs = data.map(d => d.high);
+   564→   564→  const lows = data.map(d => d.low);
+   565→   565→  const volumes = data.map(d => d.volume);
+   566→   566→  const currentPrice = closes[closes.length - 1];
+   567→   567→
+   568→   568→  let score = 0; // -100 to +100
+   569→   569→
+   570→   570→  // 1. EMA Trend (weight: 25)
+   571→   571→  const ema9 = EMA(closes, Math.min(9, Math.floor(closes.length * 0.3)));
+   572→   572→  const ema21 = EMA(closes, Math.min(21, Math.floor(closes.length * 0.6)));
+   573→   573→  const lastEma9 = ema9[ema9.length - 1];
+   574→   574→  const lastEma21 = ema21[ema21.length - 1];
+   575→   575→
+   576→   576→  if (!isNaN(lastEma9) && !isNaN(lastEma21)) {
+   577→   577→    if (currentPrice > lastEma9 && lastEma9 > lastEma21) score += 25;
+   578→   578→    else if (currentPrice < lastEma9 && lastEma9 < lastEma21) score -= 25;
+   579→   579→    else if (currentPrice > lastEma9) score += 12;
+   580→   580→    else score -= 12;
+   581→   581→
+   582→   582→    // EMA crossover detection
+   583→   583→    if (ema9.length >= 2 && ema21.length >= 2) {
+   584→   584→      const prevEma9 = ema9[ema9.length - 2];
+   585→   585→      const prevEma21 = ema21[ema21.length - 2];
+   586→   586→      if (!isNaN(prevEma9) && !isNaN(prevEma21)) {
+   587→   587→        if (prevEma9 <= prevEma21 && lastEma9 > lastEma21) score += 15; // Golden cross
+   588→   588→        if (prevEma9 >= prevEma21 && lastEma9 < lastEma21) score -= 15; // Death cross
+   589→   589→      }
+   590→   590→    }
+   591→   591→  }
+   592→   592→
+   593→   593→  // 2. RSI (weight: 20) — IMPROVED: more granular scoring
+   594→   594→  const rsi = RSI(closes, Math.min(14, Math.floor(closes.length * 0.4)));
+   595→   595→  const lastRSI = rsi[rsi.length - 1];
+   596→   596→  if (!isNaN(lastRSI)) {
+   597→   597→    if (lastRSI < 20) score += 25;      // Extreme oversold — strong buy
+   598→   598→    else if (lastRSI < 30) score += 18;  // Oversold
+   599→   599→    else if (lastRSI < 40) score += 8;
+   600→   600→    else if (lastRSI < 45) score += 3;
+   601→   601→    else if (lastRSI > 80) score -= 25;  // Extreme overbought — strong sell
+   602→   602→    else if (lastRSI > 70) score -= 18;  // Overbought
+   603→   603→    else if (lastRSI > 60) score -= 8;
+   604→   604→    else if (lastRSI > 55) score -= 3;
+   605→   605→
+   606→   606→    // RSI divergence
+   607→   607→    if (closes.length >= 10) {
+   608→   608→      const recentCloses = closes.slice(-10);
+   609→   609→      const recentRSI = rsi.slice(-10).filter(v => !isNaN(v));
+   610→   610→      if (recentRSI.length >= 5) {
+   611→   611→        const priceTrend = recentCloses[recentCloses.length - 1] - recentCloses[0];
+   612→   612→        const rsiTrend = recentRSI[recentRSI.length - 1] - recentRSI[0];
+   613→   613→        if (priceTrend > 0 && rsiTrend < 0) score -= 12; // Bearish divergence
+   614→   614→        if (priceTrend < 0 && rsiTrend > 0) score += 12; // Bullish divergence
+   615→   615→      }
+   616→   616→    }
+   617→   617→  }
+   618→   618→
+   619→   619→  // 3. MACD (weight: 20) — IMPROVED: stronger crossover signals
+   620→   620→  const macd = MACD(closes, 12, 26, 9);
+   621→   621→  const lastMacd = macd.macd[macd.macd.length - 1];
+   622→   622→  const lastSignal = macd.signal[macd.signal.length - 1];
+   623→   623→  const lastHist = macd.histogram[macd.histogram.length - 1];
+   624→   624→  const prevHist = macd.histogram[macd.histogram.length - 2];
+   625→   625→
+   626→   626→  if (!isNaN(lastMacd) && !isNaN(lastSignal)) {
+   627→   627→    if (lastMacd > lastSignal) score += 12;
+   628→   628→    else score -= 12;
+   629→   629→
+   630→   630→    // Histogram momentum
+   631→   631→    if (!isNaN(lastHist) && !isNaN(prevHist)) {
+   632→   632→      if (lastHist > prevHist && lastHist > 0) score += 10;  // Growing bullish momentum
+   633→   633→      else if (lastHist < prevHist && lastHist < 0) score -= 10;  // Growing bearish momentum
+   634→   634→      else if (lastHist > prevHist && lastHist < 0) score += 5;  // Slowing bearish
+   635→   635→      else if (lastHist < prevHist && lastHist > 0) score -= 5;  // Slowing bullish
+   636→   636→    }
+   637→   637→
+   638→   638→    // MACD crossover — strong signal
+   639→   639→    if (macd.macd.length >= 2 && macd.signal.length >= 2) {
+   640→   640→      const prevMacd = macd.macd[macd.macd.length - 2];
+   641→   641→      const prevSignal = macd.signal[macd.signal.length - 2];
+   642→   642→      if (!isNaN(prevMacd) && !isNaN(prevSignal)) {
+   643→   643→        if (prevMacd <= prevSignal && lastMacd > lastSignal) score += 15; // Bullish crossover
+   644→   644→        if (prevMacd >= prevSignal && lastMacd < lastSignal) score -= 15; // Bearish crossover
+   645→   645→      }
+   646→   646→    }
+   647→   647→  }
+   648→   648→
+   649→   649→  // 4. Bollinger Bands (weight: 15) — IMPROVED: squeeze detection scoring
+   650→   650→  const bbPeriod = Math.min(20, Math.floor(closes.length * 0.6));
+   651→   651→  if (bbPeriod >= 5) {
+   652→   652→    const bb = BollingerBands(closes, bbPeriod, 2);
+   653→   653→    const lastUpper = bb.upper[bb.upper.length - 1];
+   654→   654→    const lastLower = bb.lower[bb.lower.length - 1];
+   655→   655→    if (!isNaN(lastUpper) && !isNaN(lastLower)) {
+   656→   656→      const bbPos = (currentPrice - lastLower) / (lastUpper - lastLower);
+   657→   657→      if (bbPos < 0.05) score += 18;     // At lower band = buy
+   658→   658→      else if (bbPos < 0.15) score += 10;
+   659→   659→      else if (bbPos > 0.95) score -= 18; // At upper band = sell
+   660→   660→      else if (bbPos > 0.85) score -= 10;
+   661→   661→
+   662→   662→      // Squeeze detection — breakout coming
+   663→   663→      const bbWidth = (lastUpper - lastLower) / ((lastUpper + lastLower) / 2);
+   664→   664→      // Check historical BB width for squeeze
+   665→   665→      if (bb.upper.length >= 20) {
+   666→   666→        const prevBBWidth = (bb.upper[bb.upper.length - 20] - bb.lower[bb.lower.length - 20]) /
+   667→   667→          ((bb.upper[bb.upper.length - 20] + bb.lower[bb.lower.length - 20]) / 2);
+   668→   668→        if (!isNaN(prevBBWidth) && bbWidth < prevBBWidth * 0.5) {
+   669→   669→          // Bollinger squeeze — breakout imminent
+   670→   670→          // Score in the direction of the last close vs EMA
+   671→   671→          if (currentPrice > lastEma9) score += 5;
+   672→   672→          else score -= 5;
+   673→   673→        }
+   674→   674→      }
+   675→   675→    }
+   676→   676→  }
+   677→   677→
+   678→   678→  // 5. Stochastic (weight: 10)
+   679→   679→  const stoch = Stochastic(highs, lows, closes, 14, 3);
+   680→   680→  const lastK = stoch.k[stoch.k.length - 1];
+   681→   681→  const lastD = stoch.d[stoch.d.length - 1];
+   682→   682→  if (!isNaN(lastK) && !isNaN(lastD)) {
+   683→   683→    if (lastK < 20) score += 10;
+   684→   684→    else if (lastK < 30) score += 5;
+   685→   685→    else if (lastK > 80) score -= 10;
+   686→   686→    else if (lastK > 70) score -= 5;
+   687→   687→
+   688→   688→    // K/D crossover
+   689→   689→    const prevK = stoch.k[stoch.k.length - 2];
+   690→   690→    const prevD = stoch.d[stoch.d.length - 2];
+   691→   691→    if (!isNaN(prevK) && !isNaN(prevD)) {
+   692→   692→      if (prevK <= prevD && lastK > lastD && lastK < 50) score += 6;
+   693→   693→      if (prevK >= prevD && lastK < lastD && lastK > 50) score -= 6;
+   694→   694→    }
+   695→   695→  }
+   696→   696→
+   697→   697→  // 6. Volume confirmation (weight: 15) — IMPROVED
+   698→   698→  if (volumes.length >= 10) {
+   699→   699→    const avgVol = volumes.slice(-20).reduce((a, b) => a + b, 0) / Math.min(20, volumes.length);
+   700→   700→    const lastVol = volumes[volumes.length - 1];
+   701→   701→    const volRatio = avgVol > 0 ? lastVol / avgVol : 1;
+   702→   702→    const priceChange = closes[closes.length - 1] - closes[closes.length - 2];
+   703→   703→
+   704→   704→    if (volRatio > 2.5) {
+   705→   705→      if (priceChange > 0) score += 15; // High volume up move
+   706→   706→      else score -= 15; // High volume down move
+   707→   707→    } else if (volRatio > 1.5) {
+   708→   708→      if (priceChange > 0) score += 8;
+   709→   709→      else score -= 8;
+   710→   710→    }
+   711→   711→
+   712→   712→    // OBV confirmation
+   713→   713→    const obv = OBV(closes, volumes);
+   714→   714→    const obvRecent = obv.slice(-5);
+   715→   715→    if (obvRecent.length >= 5) {
+   716→   716→      const obvTrend = obvRecent[obvRecent.length - 1] - obvRecent[0];
+   717→   717→      const priceTrend = closes[closes.length - 1] - closes[closes.length - 5];
+   718→   718→      if (obvTrend > 0 && priceTrend > 0) score += 5; // OBV confirms uptrend
+   719→   719→      if (obvTrend < 0 && priceTrend < 0) score -= 5; // OBV confirms downtrend
+   720→   720→      if (obvTrend > 0 && priceTrend < 0) score += 3; // Bullish divergence OBV
+   721→   721→      if (obvTrend < 0 && priceTrend > 0) score -= 3; // Bearish divergence OBV
+   722→   722→    }
+   723→   723→  }
+   724→   724→
+   725→   725→  // 7. Candlestick pattern bonus (NEW!)
+   726→   726→  const pattern = detectCandlePatterns(data);
+   727→   727→  if (pattern) {
+   728→   728→    if (pattern.signal === 'BULLISH') score += pattern.strength * 2;
+   729→   729→    else if (pattern.signal === 'BEARISH') score -= pattern.strength * 2;
+   730→   730→  }
+   731→   731→
+   732→   732→  // 8. VWAP position bonus (NEW!)
+   733→   733→  if (data.length >= 20) {
+   734→   734→    const vwap = VWAP(data);
+   735→   735→    const lastVwap = vwap[vwap.length - 1];
+   736→   736→    if (!isNaN(lastVwap) && lastVwap > 0) {
+   737→   737→      if (currentPrice > lastVwap * 1.005) score += 5;  // Above VWAP = bullish
+   738→   738→      else if (currentPrice < lastVwap * 0.995) score -= 5; // Below VWAP = bearish
+   739→   739→    }
+   740→   740→  }
+   741→   741→
+   742→   742→  // Clamp score
+   743→   743→  score = Math.max(-100, Math.min(100, score));
+   744→   744→
+   745→   745→  // LOWERED threshold for signal generation (was ±8, now ±3)
+   746→   746→  const direction: 'BULLISH' | 'BEARISH' | 'NEUTRAL' =
+   747→   747→    score > 3 ? 'BULLISH' : score < -3 ? 'BEARISH' : 'NEUTRAL';
+   748→   748→
+   749→   749→  const trend = score > 40 ? 'Сильный восходящий' :
+   750→   750→                score > 15 ? 'Восходящий' :
+   751→   751→                score < -40 ? 'Сильный нисходящий' :
+   752→   752→                score < -15 ? 'Нисходящий' : 'Боковик';
+   753→   753→
+   754→   754→  const levels = findKeyLevels(data);
+   755→   755→  const keyLevel = direction === 'BULLISH'
+   756→   756→    ? `Сопр: ${formatTP(levels.nearestResistance)}`
+   757→   757→    : direction === 'BEARISH'
+   758→   758→    ? `Подд: ${formatTP(levels.nearestSupport)}`
+   759→   759→    : `Пивот: ${formatTP(levels.pivot)}`;
+   760→   760→
+   761→   761→  return { direction, score, trend, keyLevel };
+   762→   762→}
+   763→   763→
+   764→   764→// ============================================
+   765→   765→// MULTI-TIMEFRAME TRADE SIGNAL GENERATOR (IMPROVED)
+   766→   766→// ============================================
+   767→   767→
+   768→   768→export function generateTradeSignal(
+   769→   769→  data: OHLCV[],
+   770→   770→  timeframe: string, // '1m', '5m', '15m', '1h', '4h'
+   771→   771→  higherTFData?: OHLCV[]
+   772→   772→): TradeSignal {
+   773→   773→  const currentPrice = data.length > 0 ? data[data.length - 1].close : 0;
+   774→   774→  const closes = data.map(d => d.close);
+   775→   775→  const highs = data.map(d => d.high);
+   776→   776→  const lows = data.map(d => d.low);
+   777→   777→  const volumes = data.map(d => d.volume);
+   778→   778→
+   779→   779→  // Default flat signal
+   780→   780→  const flatSignal: TradeSignal = {
+   781→   781→    direction: 'FLAT',
+   782→   782→    confidence: 0,
+   783→   783→    entry: currentPrice,
+   784→   784→    entryType: 'LIMIT',
+   785→   785→    entryReason: 'Нет сигнала для входа',
+   786→   786→    stopLoss: currentPrice,
+   787→   787→    takeProfit1: currentPrice,
+   788→   788→    takeProfit2: currentPrice,
+   789→   789→    takeProfit3: currentPrice,
+   790→   790→    riskReward: 0,
+   791→   791→    holdDuration: '—',
+   792→   792→    holdDurationHours: 0,
+   793→   793→    reasons: ['Нет чёткого сигнала для входа. Ожидайте.'],
+   794→   794→    warnings: ['Рынок в боковике, вход рискован.'],
+   795→   795→    indicators: [],
+   796→   796→    multiTimeframe: {
+   797→   797→      consensus: 'NEUTRAL',
+   798→   798→      alignment: 0,
+   799→   799→    },
+   800→   800→    currentPrice,
+   801→   801→    atr: 0,
+   802→   802→    support: currentPrice * 0.97,
+   803→   803→    resistance: currentPrice * 1.03,
+   804→   804→    trend: 'SIDEWAYS',
+   805→   805→    momentum: 'WEAK',
+   806→   806→    candlePattern: null,
+   807→   807→    volumeSignal: null,
+   808→   808→  };
+   809→   809→
+   810→   810→  if (data.length < 15) return flatSignal;
+   811→   811→
+   812→   812→  // 1. Analyze current timeframe
+   813→   813→  const tfVerdict = analyzeTimeframe(data);
+   814→   814→
+   815→   815→  // 2. Analyze higher timeframe if available
+   816→   816→  let higherTFVerdict: TimeframeVerdict | null = null;
+   817→   817→  if (higherTFData && higherTFData.length >= 20) {
+   818→   818→    higherTFVerdict = analyzeTimeframe(higherTFData);
+   819→   819→  }
+   820→   820→
+   821→   821→  // 3. Key levels
+   822→   822→  const levels = findKeyLevels(data);
+   823→   823→  const { nearestSupport, nearestResistance } = levels;
+   824→   824→
+   825→   825→  // 4. ATR for stop/target calculation
+   826→   826→  const atrValues = ATR(highs, lows, closes, 14);
+   827→   827→  const lastATR = atrValues[atrValues.length - 1];
+   828→   828→  const atr = isNaN(lastATR) ? currentPrice * 0.02 : lastATR;
+   829→   829→
+   830→   830→  // 5. Trend determination
+   831→   831→  const ema9 = EMA(closes, 9);
+   832→   832→  const ema21 = EMA(closes, 21);
+   833→   833→  const lastEma9 = ema9[ema9.length - 1];
+   834→   834→  const lastEma21 = ema21[ema21.length - 1];
+   835→   835→  const adxValues = ADX(highs, lows, closes, 14);
+   836→   836→  const lastADX = adxValues[adxValues.length - 1];
+   837→   837→  const trendStrength = isNaN(lastADX) ? 20 : lastADX;
+   838→   838→
+   839→   839→  let trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS' = 'SIDEWAYS';
+   840→   840→  if (!isNaN(lastEma9) && !isNaN(lastEma21)) {
+   841→   841→    if (lastEma9 > lastEma21 && currentPrice > lastEma9) trend = 'BULLISH';
+   842→   842→    else if (lastEma9 < lastEma21 && currentPrice < lastEma9) trend = 'BEARISH';
+   843→   843→  }
+   844→   844→
+   845→   845→  // 6. Momentum
+   846→   846→  const rsiValues = RSI(closes, 14);
+   847→   847→  const lastRSI = rsiValues[rsiValues.length - 1] || 50;
+   848→   848→  const macdResult = MACD(closes);
+   849→   849→  const lastHist = macdResult.histogram[macdResult.histogram.length - 1];
+   850→   850→  const prevHist = macdResult.histogram[macdResult.histogram.length - 2];
+   851→   851→
+   852→   852→  let momentum: 'STRONG' | 'MODERATE' | 'WEAK' = 'WEAK';
+   853→   853→  const momentumScore = Math.abs(tfVerdict.score);
+   854→   854→  if (momentumScore > 50 && trendStrength > 25) momentum = 'STRONG';
+   855→   855→  else if (momentumScore > 25) momentum = 'MODERATE';
+   856→   856→
+   857→   857→  // 7. Candle pattern detection
+   858→   858→  const candlePattern = detectCandlePatterns(data);
+   859→   859→  const patternName = candlePattern ? candlePattern.name : null;
+   860→   860→
+   861→   861→  // 8. Volume analysis
+   862→   862→  const volumeAnalysis = analyzeVolume(data);
+   863→   863→
+   864→   864→  // 9. Multi-timeframe consensus
+   865→   865→  const mtf: MultiTimeframeResult = {
+   866→   866→    consensus: 'NEUTRAL',
+   867→   867→    alignment: 0,
+   868→   868→  };
+   869→   869→
+   870→   870→  const scores: number[] = [tfVerdict.score];
+   871→   871→  if (higherTFVerdict) {
+   872→   872→    scores.push(higherTFVerdict.score * 0.7);
+   873→   873→  }
+   874→   874→
+   875→   875→  const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+   876→   876→
+   877→   877→  // Candle pattern bonus to avgScore
+   878→   878→  let adjustedScore = avgScore;
+   879→   879→  if (candlePattern) {
+   880→   880→    if (candlePattern.signal === 'BULLISH') adjustedScore += candlePattern.strength * 1.5;
+   881→   881→    else if (candlePattern.signal === 'BEARISH') adjustedScore -= candlePattern.strength * 1.5;
+   882→   882→  }
+   883→   883→
+   884→   884→  // Volume spike bonus
+   885→   885→  if (volumeAnalysis.isVolumeSpike) {
+   886→   886→    if (volumeAnalysis.signal?.includes('BULLISH')) adjustedScore += 8;
+   887→   887→    else if (volumeAnalysis.signal?.includes('BEARISH')) adjustedScore -= 8;
+   888→   888→  }
+   889→   889→
+   890→   890→  const alignment = Math.min(100, Math.abs(adjustedScore) * 1.2);
+   891→   891→
+   892→   892→  // LOWERED consensus thresholds
+   893→   893→  if (adjustedScore > 25) mtf.consensus = 'STRONG_LONG';
+   894→   894→  else if (adjustedScore > 8) mtf.consensus = 'LONG';
+   895→   895→  else if (adjustedScore < -25) mtf.consensus = 'STRONG_SHORT';
+   896→   896→  else if (adjustedScore < -8) mtf.consensus = 'SHORT';
+   897→   897→  else mtf.consensus = 'NEUTRAL';
+   898→   898→  mtf.alignment = Math.round(alignment);
+   899→   899→
+   900→   900→  // Assign timeframe verdicts
+   901→   901→  if (timeframe === '1m') {
+   902→   902→    mtf.m5 = tfVerdict; // 1m maps closest to m5
+   903→   903→    if (higherTFVerdict) mtf.m15 = higherTFVerdict;
+   904→   904→  } else if (timeframe === '5m') {
+   905→   905→    mtf.m5 = tfVerdict;
+   906→   906→    if (higherTFVerdict) mtf.m15 = higherTFVerdict;
+   907→   907→  } else if (timeframe === '15m') {
+   908→   908→    mtf.m15 = tfVerdict;
+   909→   909→    if (higherTFVerdict) mtf.h1 = higherTFVerdict;
+   910→   910→  } else if (timeframe === '1h') {
+   911→   911→    mtf.h1 = tfVerdict;
+   912→   912→    if (higherTFVerdict) mtf.h4 = higherTFVerdict;
+   913→   913→  } else if (timeframe === '4h') {
+   914→   914→    mtf.h4 = tfVerdict;
+   915→   915→  }
+   916→   916→
+   917→   917→  // 10. Determine direction — LOWERED THRESHOLDS (was ±5, now ±2)
+   918→   918→  const isLong = adjustedScore > 2;
+   919→   919→  const isShort = adjustedScore < -2;
+   920→   920→  const isFlat = !isLong && !isShort;
+   921→   921→
+   922→   922→  if (isFlat) {
+   923→   923→    flatSignal.trend = trend;
+   924→   924→    flatSignal.momentum = momentum;
+   925→   925→    flatSignal.multiTimeframe = mtf;
+   926→   926→    flatSignal.atr = atr;
+   927→   927→    flatSignal.support = nearestSupport;
+   928→   928→    flatSignal.resistance = nearestResistance;
+   929→   929→    flatSignal.indicators = buildIndicatorList(data);
+   930→   930→    flatSignal.candlePattern = patternName;
+   931→   931→    flatSignal.volumeSignal = volumeAnalysis.description;
+   932→   932→    return flatSignal;
+   933→   933→  }
+   934→   934→
+   935→   935→  const direction: 'LONG' | 'SHORT' = isLong ? 'LONG' : 'SHORT';
+   936→   936→
+   937→   937→  // ============================================
+   938→   938→  // SMART ENTRY v2: STRATEGIC LIMIT ORDER AT REALISTIC PULLBACK LEVEL
+   939→   939→  // ============================================
+   940→   940→  // Philosophy: A good trader NEVER chases the market. They wait for price to come to them.
+   941→   941→  // KEY PRINCIPLE: Enter at a pullback level, place stop BEYOND the structure that invalidates the trade.
+   942→   942→  // For LONG: enter on a pullback to EMA/Fib/VWAP, stop below the recent swing low
+   943→   943→  // For SHORT: enter on a bounce to EMA/Fib/VWAP, stop above the recent swing high
+   944→   944→  
+   945→   945→  // Find recent swing points for stop placement
+   946→   946→  const swingLow = findLastSwingLow(data);
+   947→   947→  const swingHigh = findLastSwingHigh(data);
+   948→   948→
+   949→   949→  // Pullback zone: last 20 candles range for Fib calculations
+   950→   950→  const lookback = Math.min(data.length, 40);
+   951→   951→  const recentLows = data.slice(-lookback).map(d => d.low);
+   952→   952→  const recentHighs = data.slice(-lookback).map(d => d.high);
+   953→   953→  const recentLow = Math.min(...recentLows);
+   954→   954→  const recentHigh = Math.max(...recentHighs);
+   955→   955→
+   956→   956→  let entry: number;
+   957→   957→  let entryType: 'LIMIT' | 'MARKET' = 'LIMIT';
+   958→   958→  let entryReason: string;
+   959→   959→
+   960→   960→  // Calculate pullback targets — these are the "ideal" entry zones
+   961→   961→  if (direction === 'LONG') {
+   962→   962→    // For LONG: we want to buy on a pullback (dip) to a dynamic level
+   963→   963→    // DO NOT use support as entry — support is where the STOP goes!
+   964→   964→    // Entry levels: EMA21, VWAP, Fib retracements
+   965→   965→    const pullbackToEMA = lastEma21;                      // Entry at EMA21 (dynamic support)
+   966→   966→    const pullbackToVWAP = volumeAnalysis.vwap;           // Entry at VWAP (fair value)
+   967→   967→    const fib382 = currentPrice - (recentHigh - recentLow) * 0.382;  // 38.2% retracement
+   968→   968→    const fib50 = currentPrice - (recentHigh - recentLow) * 0.5;     // 50% retracement
+   969→   969→    const fib618 = currentPrice - (recentHigh - recentLow) * 0.618;  // 61.8% retracement
+   970→   970→
+   971→   971→    // Collect all valid candidates that are BELOW current price (buy the dip)
+   972→   972→    // Sort by distance from current price — pick the CLOSEST realistic level (not the farthest)
+   973→   973→    const candidates = [
+   974→   974→      { price: pullbackToEMA, reason: 'Откат к EMA21 — динамическая поддержка', minDist: 0.001 },
+   975→   975→      { price: pullbackToVWAP, reason: 'Откат к VWAP — справедливая цена дня', minDist: 0.001 },
+   976→   976→      { price: fib382, reason: 'Откат 38.2% Фибоначчи — мелкий откат', minDist: 0.002 },
+   977→   977→      { price: fib50, reason: 'Откат 50% Фибоначчи — стандартный откат', minDist: 0.003 },
+   978→   978→      { price: fib618, reason: 'Откат 61.8% Фибоначчи — глубокий откат', minDist: 0.004 },
+   979→   979→    ]
+   980→   980→      .filter(c => !isNaN(c.price) && c.price > 0 && c.price < currentPrice * (1 - c.minDist))
+   981→   981→      .sort((a, b) => (currentPrice - a.price) - (currentPrice - b.price)); // Closest first
+   982→   982→
+   983→   983→    if (candidates.length > 0) {
+   984→   984→      // Pick the closest level to current price that is still meaningfully below it
+   985→   985→      // This gives the best risk:reward while being realistic
+   986→   986→      entry = candidates[0].price;
+   987→   987→      entryType = 'LIMIT';
+   988→   988→      entryReason = candidates[0].reason;
+   989→   989→    } else {
+   990→   990→      // No pullback level found below price — use ATR-based pullback
+   991→   991→      // Still use LIMIT, never MARKET for LONG
+   992→   992→      entry = currentPrice - atr * 0.5;
+   993→   993→      entryType = 'LIMIT';
+   994→   994→      entryReason = 'Лимитный ордер на откате (0.5 ATR от текущей цены)';
+   995→   995→    }
+   996→   996→  } else {
+   997→   997→    // For SHORT: we want to sell on a bounce (rip) to a dynamic level
+   998→   998→    // DO NOT use resistance as entry — resistance is where the STOP goes!
+   999→   999→    const bounceToEMA = lastEma21;                         // Entry at EMA21 (dynamic resistance)
+  1000→  1000→    const bounceToVWAP = volumeAnalysis.vwap;              // Entry at VWAP (fair value)
+  1001→  1001→    const fib382 = currentPrice + (recentHigh - recentLow) * 0.382;  // 38.2% retracement up
+  1002→  1002→    const fib50 = currentPrice + (recentHigh - recentLow) * 0.5;     // 50% retracement up
+  1003→  1003→    const fib618 = currentPrice + (recentHigh - recentLow) * 0.618;  // 61.8% retracement up
+  1004→  1004→
+  1005→  1005→    const candidates = [
+  1006→  1006→      { price: bounceToEMA, reason: 'Откат к EMA21 — динамическое сопротивление', minDist: 0.001 },
+  1007→  1007→      { price: bounceToVWAP, reason: 'Откат к VWAP — справедливая цена дня', minDist: 0.001 },
+  1008→  1008→      { price: fib382, reason: 'Откат 38.2% Фибоначчи — мелкий откат', minDist: 0.002 },
+  1009→  1009→      { price: fib50, reason: 'Откат 50% Фибоначчи — стандартный откат', minDist: 0.003 },
+  1010→  1010→      { price: fib618, reason: 'Откат 61.8% Фибоначчи — глубокий откат', minDist: 0.004 },
+  1011→  1011→    ]
+  1012→  1012→      .filter(c => !isNaN(c.price) && c.price > 0 && c.price > currentPrice * (1 + c.minDist))
+  1013→  1013→      .sort((a, b) => (a.price - currentPrice) - (b.price - currentPrice)); // Closest first
+  1014→  1014→
+  1015→  1015→    if (candidates.length > 0) {
+  1016→  1016→      entry = candidates[0].price;
+  1017→  1017→      entryType = 'LIMIT';
+  1018→  1018→      entryReason = candidates[0].reason;
+  1019→  1019→    } else {
+  1020→  1020→      entry = currentPrice + atr * 0.5;
+  1021→  1021→      entryType = 'LIMIT';
+  1022→  1022→      entryReason = 'Лимитный ордер на откате (0.5 ATR от текущей цены)';
+  1023→  1023→    }
+  1024→  1024→  }
+  1025→  1025→
+  1026→  1026→  // Stop loss: placed BEYOND the structural invalidation point (swing high/low), NOT just ATR
+  1027→  1027→  // For intraday crypto: minimum 1.0% from entry to avoid noise
+  1028→  1028→  const minSlPct = 0.01; // 1.0% minimum SL distance for crypto — 0.5% gets hit by normal volatility
+  1029→  1029→  let stopLoss: number;
+  1030→  1030→  if (direction === 'LONG') {
+  1031→  1031→    // For LONG: stop below the last swing low + buffer
+  1032→  1032→    const structuralStop = swingLow - atr * 0.3;
+  1033→  1033→    const atrStop = entry - atr * 2.0;              // Wider ATR stop (2.0 ATR for crypto)
+  1034→  1034→    const supportStop = nearestSupport - atr * 0.2;
+  1035→  1035→    const minPctStop = entry * (1 - minSlPct);       // At least 1.0% below entry
+  1036→  1036→    
+  1037→  1037→    stopLoss = Math.max(
+  1038→  1038→      Math.min(structuralStop, supportStop),
+  1039→  1039→      atrStop,
+  1040→  1040→      minPctStop                                      // Enforce minimum distance
+  1041→  1041→    );
+  1042→  1042→    if (entry - stopLoss < atr * 1.0) stopLoss = entry - atr * 1.5;
+  1043→  1043→    // Final safety: ensure at least 1.0% distance
+  1044→  1044→    if ((entry - stopLoss) / entry < minSlPct) stopLoss = entry * (1 - minSlPct);
+  1045→  1045→  } else {
+  1046→  1046→    // For SHORT: stop above the last swing high + buffer
+  1047→  1047→    const structuralStop = swingHigh + atr * 0.3;
+  1048→  1048→    const atrStop = entry + atr * 2.0;
+  1049→  1049→    const resistanceStop = nearestResistance + atr * 0.2;
+  1050→  1050→    const minPctStop = entry * (1 + minSlPct);       // At least 1.0% above entry
+  1051→  1051→    
+  1052→  1052→    stopLoss = Math.min(
+  1053→  1053→      Math.max(structuralStop, resistanceStop),
+  1054→  1054→      atrStop,
+  1055→  1055→      minPctStop
+  1056→  1056→    );
+  1057→  1057→    if (stopLoss - entry < atr * 1.0) stopLoss = entry + atr * 1.5;
+  1058→  1058→    if ((stopLoss - entry) / entry < minSlPct) stopLoss = entry * (1 + minSlPct);
+  1059→  1059→  }
+  1060→  1060→
+  1061→  1061→  // Take profit levels based on R:R — calculated from ENTRY, not current price
+  1062→  1062→  const risk = Math.abs(entry - stopLoss);
+  1063→  1063→  const takeProfit1 = direction === 'LONG' ? entry + risk * 1.5 : entry - risk * 1.5;
+  1064→  1064→  const takeProfit2 = direction === 'LONG' ? entry + risk * 2.5 : entry - risk * 2.5;
+  1065→  1065→  const takeProfit3 = direction === 'LONG' ? entry + risk * 4 : entry - risk * 4;
+  1066→  1066→
+  1067→  1067→  const reward = Math.abs(takeProfit2 - entry);
+  1068→  1068→  const riskReward = risk > 0 ? reward / risk : 0;
+  1069→  1069→
+  1070→  1070→  // Hold duration based on timeframe
+  1071→  1071→  const holdDurationHours: number =
+  1072→  1072→    timeframe === '1m' ? 0.5 :
+  1073→  1073→    timeframe === '5m' ? 1 :
+  1074→  1074→    timeframe === '15m' ? 3 :
+  1075→  1075→    timeframe === '1h' ? 8 :
+  1076→  1076→    timeframe === '4h' ? 24 :
+  1077→  1077→    12;
+  1078→  1078→
+  1079→  1079→  const holdDuration = holdDurationHours <= 0.5 ? `${holdDurationHours * 60}-${holdDurationHours * 60 + 15} мин` :
+  1080→  1080→                       holdDurationHours <= 2 ? `${holdDurationHours * 60 - 15}-${holdDurationHours * 60 + 30} мин` :
+  1081→  1081→                       holdDurationHours <= 6 ? `${holdDurationHours - 1}-${holdDurationHours + 2} ч` :
+  1082→  1082→                       holdDurationHours <= 12 ? `${holdDurationHours - 2}-${holdDurationHours + 4} ч` :
+  1083→  1083→                       `${Math.round(holdDurationHours / 24 * 10) / 10}-${Math.round((holdDurationHours / 24 + 1) * 10) / 10} дня`;
+  1084→  1084→
+  1085→  1085→  // Confidence calculation — IMPROVED
+  1086→  1086→  let confidence = 0;
+  1087→  1087→  confidence += Math.min(35, Math.abs(adjustedScore) * 0.45); // TF score
+  1088→  1088→  confidence += trend === (direction === 'LONG' ? 'BULLISH' : 'BEARISH') ? 15 : trend === 'SIDEWAYS' ? 5 : 0;
+  1089→  1089→  confidence += momentum === 'STRONG' ? 15 : momentum === 'MODERATE' ? 8 : 0;
+  1090→  1090→  confidence += higherTFVerdict ? (higherTFVerdict.direction === (direction === 'LONG' ? 'BULLISH' : 'BEARISH') ? 15 : 0) : 5;
+  1091→  1091→  confidence += riskReward >= 3 ? 10 : riskReward >= 2 ? 5 : 0;
+  1092→  1092→  // Bonus for candle pattern
+  1093→  1093→  if (candlePattern && candlePattern.signal === (direction === 'LONG' ? 'BULLISH' : 'BEARISH')) {
+  1094→  1094→    confidence += candlePattern.strength * 1.5;
+  1095→  1095→  }
+  1096→  1096→  // Bonus for volume confirmation
+  1097→  1097→  if (volumeAnalysis.isVolumeSpike && volumeAnalysis.signal?.includes(direction === 'LONG' ? 'BULLISH' : 'BEARISH')) {
+  1098→  1098→    confidence += 8;
+  1099→  1099→  }
+  1100→  1100→  // Bonus for VWAP confirmation
+  1101→  1101→  if (direction === 'LONG' && volumeAnalysis.vwapPosition === 'ABOVE') confidence += 5;
+  1102→  1102→  if (direction === 'SHORT' && volumeAnalysis.vwapPosition === 'BELOW') confidence += 5;
+  1103→  1103→
+  1104→  1104→  confidence = Math.min(95, Math.max(10, Math.round(confidence)));
+  1105→  1105→
+  1106→  1106→  // Build reasons and warnings
+  1107→  1107→  const reasons: string[] = [];
+  1108→  1108→  const warnings: string[] = [];
+  1109→  1109→
+  1110→  1110→  // Add entry reason first — most important
+  1111→  1111→  reasons.push(entryReason);
+  1112→  1112→
+  1113→  1113→  if (direction === 'LONG') {
+  1114→  1114→    if (trend === 'BULLISH') reasons.push('Восходящий тренд подтверждён EMA');
+  1115→  1115→    if (!isNaN(lastRSI) && lastRSI < 40) reasons.push(`RSI ${lastRSI.toFixed(0)} — потенциал роста`);
+  1116→  1116→    if (!isNaN(lastHist) && !isNaN(prevHist) && lastHist > prevHist && lastHist > 0) reasons.push('MACD гистограмма растёт');
+  1117→  1117→    { const mv = macdResult.macd[macdResult.macd.length - 1]; const sv = macdResult.signal[macdResult.signal.length - 1]; if (!isNaN(mv) && !isNaN(sv) && mv > sv) reasons.push('MACD выше сигнальной'); }
+  1118→  1118→    if (higherTFVerdict?.direction === 'BULLISH') reasons.push('Старший ТФ подтверждает рост');
+  1119→  1119→    if (currentPrice <= nearestSupport * 1.005) reasons.push('Цена у уровня поддержки — отбой');
+  1120→  1120→    if (trendStrength > 25) reasons.push(`ADX ${trendStrength.toFixed(0)} — тренд сильный`);
+  1121→  1121→    if (candlePattern && candlePattern.signal === 'BULLISH') reasons.push(`Свечной паттерн: ${candlePattern.name}`);
+  1122→  1122→    if (volumeAnalysis.isVolumeSpike) reasons.push(`Объём x${volumeAnalysis.volumeRatio.toFixed(1)} — подтверждение`);
+  1123→  1123→    if (volumeAnalysis.vwapPosition === 'ABOVE') reasons.push('Цена выше VWAP — бычий настрой');
+  1124→  1124→    if (volumeAnalysis.obvTrend === 'RISING') reasons.push('OBV растёт — накопление');
+  1125→  1125→  } else {
+  1126→  1126→    if (trend === 'BEARISH') reasons.push('Нисходящий тренд подтверждён EMA');
+  1127→  1127→    if (!isNaN(lastRSI) && lastRSI > 60) reasons.push(`RSI ${lastRSI.toFixed(0)} — потенциал снижения`);
+  1128→  1128→    if (!isNaN(lastHist) && !isNaN(prevHist) && lastHist < prevHist && lastHist < 0) reasons.push('MACD гистограмма падает');
+  1129→  1129→    const macdVal = macdResult.macd[macdResult.macd.length - 1];
+  1130→  1130→    const sigVal = macdResult.signal[macdResult.signal.length - 1];
+  1131→  1131→    if (!isNaN(macdVal) && !isNaN(sigVal) && macdVal < sigVal) reasons.push('MACD ниже сигнальной');
+  1132→  1132→    if (higherTFVerdict?.direction === 'BEARISH') reasons.push('Старший ТФ подтверждает снижение');
+  1133→  1133→    if (currentPrice >= nearestResistance * 0.995) reasons.push('Цена у сопротивления — отбой');
+  1134→  1134→    if (trendStrength > 25) reasons.push(`ADX ${trendStrength.toFixed(0)} — тренд сильный`);
+  1135→  1135→    if (candlePattern && candlePattern.signal === 'BEARISH') reasons.push(`Свечной паттерн: ${candlePattern.name}`);
+  1136→  1136→    if (volumeAnalysis.isVolumeSpike) reasons.push(`Объём x${volumeAnalysis.volumeRatio.toFixed(1)} — подтверждение`);
+  1137→  1137→    if (volumeAnalysis.vwapPosition === 'BELOW') reasons.push('Цена ниже VWAP — медвежий настрой');
+  1138→  1138→    if (volumeAnalysis.obvTrend === 'FALLING') reasons.push('OBV падает — распределение');
+  1139→  1139→  }
+  1140→  1140→
+  1141→  1141→  if (confidence < 40) warnings.push('Низкая уверенность — используйте меньший размер позиции');
+  1142→  1142→  if (trend === 'SIDEWAYS') warnings.push('Рынок в боковике — выше риск ложного пробоя');
+  1143→  1143→  if (riskReward < 1.5) warnings.push('R:R ниже 1.5 — риск не оправдывает потенциальную прибыль');
+  1144→  1144→  if (trendStrength < 20) warnings.push('Слабый тренд (ADX < 20) — возможен флэт');
+  1145→  1145→  if (higherTFVerdict && ((direction === 'LONG' && higherTFVerdict.direction === 'BEARISH') ||
+  1146→  1146→      (direction === 'SHORT' && higherTFVerdict.direction === 'BULLISH'))) {
+  1147→  1147→    warnings.push('ВНИМАНИЕ: старший ТФ противоречит сигналу!');
+  1148→  1148→  }
+  1149→  1149→  if (!isNaN(lastRSI) && direction === 'LONG' && lastRSI > 70) warnings.push('RSI высокий — покупка на хаях рискованна');
+  1150→  1150→  if (!isNaN(lastRSI) && direction === 'SHORT' && lastRSI < 30) warnings.push('RSI низкий — продажа на лоях рискованна');
+  1151→  1151→  // Warning for LIMIT orders: price hasn't reached entry yet
+  1152→  1152→  if (entryType === 'LIMIT') {
+  1153→  1153→    const distPct = Math.abs(currentPrice - entry) / currentPrice * 100;
+  1154→  1154→    if (distPct > 0.5) warnings.push(`Лимитный ордер — ждите отката ${distPct.toFixed(1)}% до уровня входа`);
+  1155→  1155→  }
+  1156→  1156→
+  1157→  1157→  // Build indicators
+  1158→  1158→  const indicators = buildIndicatorList(data);
+  1159→  1159→
+  1160→  1160→  return {
+  1161→  1161→    direction,
+  1162→  1162→    confidence,
+  1163→  1163→    entry,
+  1164→  1164→    entryType,
+  1165→  1165→    entryReason,
+  1166→  1166→    stopLoss,
+  1167→  1167→    takeProfit1,
+  1168→  1168→    takeProfit2,
+  1169→  1169→    takeProfit3,
+  1170→  1170→    riskReward: Math.round(riskReward * 100) / 100,
+  1171→  1171→    holdDuration,
+  1172→  1172→    holdDurationHours,
+  1173→  1173→    reasons,
+  1174→  1174→    warnings,
+  1175→  1175→    indicators,
+  1176→  1176→    multiTimeframe: mtf,
+  1177→  1177→    currentPrice,
+  1178→  1178→    atr,
+  1179→  1179→    support: nearestSupport,
+  1180→  1180→    resistance: nearestResistance,
+  1181→  1181→    trend,
+  1182→  1182→    momentum,
+  1183→  1183→    candlePattern: patternName,
+  1184→  1184→    volumeSignal: volumeAnalysis.description,
+  1185→  1185→  };
+  1186→  1186→}
+  1187→  1187→
+  1188→  1188→function buildIndicatorList(data: OHLCV[]): IndicatorResult[] {
+  1189→  1189→  const closes = data.map(d => d.close);
+  1190→  1190→  const highs = data.map(d => d.high);
+  1191→  1191→  const lows = data.map(d => d.low);
+  1192→  1192→  const volumes = data.map(d => d.volume);
+  1193→  1193→  const currentPrice = closes[closes.length - 1];
+  1194→  1194→  const indicators: IndicatorResult[] = [];
+  1195→  1195→
+  1196→  1196→  // RSI
+  1197→  1197→  const rsi = RSI(closes, 14);
+  1198→  1198→  const lastRSI = rsi[rsi.length - 1];
+  1199→  1199→  if (!isNaN(lastRSI)) {
+  1200→  1200→    indicators.push({
+  1201→  1201→      name: 'RSI (14)',
+  1202→  1202→      value: lastRSI.toFixed(1),
+  1203→  1203→      signal: lastRSI < 30 ? 'BUY' : lastRSI > 70 ? 'SELL' : 'NEUTRAL',
+  1204→  1204→      description: lastRSI < 30 ? 'Перепроданность' : lastRSI > 70 ? 'Перекупленность' : 'Нейтрально',
+  1205→  1205→      weight: 20,
+  1206→  1206→    });
+  1207→  1207→  }
+  1208→  1208→
+  1209→  1209→  // MACD
+  1210→  1210→  const macd = MACD(closes);
+  1211→  1211→  const lastMacd = macd.macd[macd.macd.length - 1];
+  1212→  1212→  const lastSig = macd.signal[macd.signal.length - 1];
+  1213→  1213→  if (!isNaN(lastMacd) && !isNaN(lastSig)) {
+  1214→  1214→    indicators.push({
+  1215→  1215→      name: 'MACD',
+  1216→  1216→      value: lastMacd.toFixed(4),
+  1217→  1217→      signal: lastMacd > lastSig ? 'BUY' : 'SELL',
+  1218→  1218→      description: lastMacd > lastSig ? 'Бычий' : 'Медвежий',
+  1219→  1219→      weight: 20,
+  1220→  1220→    });
+  1221→  1221→  }
+  1222→  1222→
+  1223→  1223→  // EMA
+  1224→  1224→  const ema9 = EMA(closes, 9);
+  1225→  1225→  const ema21 = EMA(closes, 21);
+  1226→  1226→  const e9 = ema9[ema9.length - 1];
+  1227→  1227→  const e21 = ema21[ema21.length - 1];
+  1228→  1228→  if (!isNaN(e9) && !isNaN(e21)) {
+  1229→  1229→    indicators.push({
+  1230→  1230→      name: 'EMA 9/21',
+  1231→  1231→      value: `${formatTP(e9)} / ${formatTP(e21)}`,
+  1232→  1232→      signal: e9 > e21 ? 'BUY' : 'SELL',
+  1233→  1233→      description: e9 > e21 ? 'Восходящий' : 'Нисходящий',
+  1234→  1234→      weight: 20,
+  1235→  1235→    });
+  1236→  1236→  }
+  1237→  1237→
+  1238→  1238→  // Bollinger
+  1239→  1239→  const bb = BollingerBands(closes, Math.min(20, Math.floor(closes.length * 0.6)), 2);
+  1240→  1240→  const bbU = bb.upper[bb.upper.length - 1];
+  1241→  1241→  const bbL = bb.lower[bb.lower.length - 1];
+  1242→  1242→  if (!isNaN(bbU) && !isNaN(bbL)) {
+  1243→  1243→    const pos = ((currentPrice - bbL) / (bbU - bbL)) * 100;
+  1244→  1244→    indicators.push({
+  1245→  1245→      name: 'Bollinger',
+  1246→  1246→      value: `${pos.toFixed(0)}%`,
+  1247→  1247→      signal: pos < 20 ? 'BUY' : pos > 80 ? 'SELL' : 'NEUTRAL',
+  1248→  1248→      description: pos < 20 ? 'У нижней полосы' : pos > 80 ? 'У верхней полосы' : 'В середине',
+  1249→  1249→      weight: 15,
+  1250→  1250→    });
+  1251→  1251→  }
+  1252→  1252→
+  1253→  1253→  // Stochastic
+  1254→  1254→  const stoch = Stochastic(highs, lows, closes, 14, 3);
+  1255→  1255→  const lastK = stoch.k[stoch.k.length - 1];
+  1256→  1256→  if (!isNaN(lastK)) {
+  1257→  1257→    indicators.push({
+  1258→  1258→      name: 'Stochastic',
+  1259→  1259→      value: lastK.toFixed(1),
+  1260→  1260→      signal: lastK < 20 ? 'BUY' : lastK > 80 ? 'SELL' : 'NEUTRAL',
+  1261→  1261→      description: lastK < 20 ? 'Перепроданность' : lastK > 80 ? 'Перекупленность' : 'Нейтрально',
+  1262→  1262→      weight: 15,
+  1263→  1263→    });
+  1264→  1264→  }
+  1265→  1265→
+  1266→  1266→  // ATR
+  1267→  1267→  const atrVal = ATR(highs, lows, closes, 14);
+  1268→  1268→  const lastATR = atrVal[atrVal.length - 1];
+  1269→  1269→  if (!isNaN(lastATR)) {
+  1270→  1270→    const atrPct = (lastATR / currentPrice) * 100;
+  1271→  1271→    indicators.push({
+  1272→  1272→      name: 'ATR (14)',
+  1273→  1273→      value: `${formatTP(lastATR)} (${atrPct.toFixed(2)}%)`,
+  1274→  1274→      signal: 'NEUTRAL',
+  1275→  1275→      description: atrPct > 3 ? 'Высокая волатильность' : atrPct > 1 ? 'Умеренная волатильность' : 'Низкая волатильность',
+  1276→  1276→      weight: 10,
+  1277→  1277→    });
+  1278→  1278→  }
+  1279→  1279→
+  1280→  1280→  // VWAP (NEW!)
+  1281→  1281→  if (data.length >= 20) {
+  1282→  1282→    const vwap = VWAP(data);
+  1283→  1283→    const lastVwap = vwap[vwap.length - 1];
+  1284→  1284→    if (!isNaN(lastVwap) && lastVwap > 0) {
+  1285→  1285→      const vwapPos = ((currentPrice - lastVwap) / lastVwap * 100);
+  1286→  1286→      indicators.push({
+  1287→  1287→        name: 'VWAP',
+  1288→  1288→        value: `${formatTP(lastVwap)} (${vwapPos >= 0 ? '+' : ''}${vwapPos.toFixed(2)}%)`,
+  1289→  1289→        signal: currentPrice > lastVwap ? 'BUY' : 'SELL',
+  1290→  1290→        description: currentPrice > lastVwap ? 'Цена выше VWAP' : 'Цена ниже VWAP',
+  1291→  1291→        weight: 15,
+  1292→  1292→      });
+  1293→  1293→    }
+  1294→  1294→  }
+  1295→  1295→
+  1296→  1296→  // Candle Pattern (NEW!)
+  1297→  1297→  const pattern = detectCandlePatterns(data);
+  1298→  1298→  if (pattern) {
+  1299→  1299→    indicators.push({
+  1300→  1300→      name: 'Паттерн',
+  1301→  1301→      value: pattern.name,
+  1302→  1302→      signal: pattern.signal === 'BULLISH' ? 'BUY' : pattern.signal === 'BEARISH' ? 'SELL' : 'NEUTRAL',
+  1303→  1303→      description: pattern.description,
+  1304→  1304→      weight: pattern.strength * 2,
+  1305→  1305→    });
+  1306→  1306→  }
+  1307→  1307→
+  1308→  1308→  return indicators;
+  1309→  1309→}
+  1310→  1310→
+  1311→  1311→// ============================================
+  1312→  1312→// COMPATIBLE SIGNAL GENERATOR (for existing API)
+  1313→  1313→// ============================================
+  1314→  1314→
+  1315→  1315→export function generateSignals(data: OHLCV[]): SignalResult {
+  1316→  1316→  if (data.length < 10) {
+  1317→  1317→    return {
+  1318→  1318→      type: 'HOLD',
+  1319→  1319→      strength: 0,
+  1320→  1320→      indicators: [],
+  1321→  1321→      summary: 'Недостаточно данных для анализа. Нужно минимум 10 свечей.'
+  1322→  1322→    };
+  1323→  1323→  }
+  1324→  1324→
+  1325→  1325→  const tradeSignal = generateTradeSignal(data, '1h');
+  1326→  1326→  const type: 'BUY' | 'SELL' | 'HOLD' =
+  1327→  1327→    tradeSignal.direction === 'LONG' ? 'BUY' :
+  1328→  1328→    tradeSignal.direction === 'SHORT' ? 'SELL' : 'HOLD';
+  1329→  1329→
+  1330→  1330→  const strength = tradeSignal.confidence;
+  1331→  1331→
+  1332→  1332→  const summary = tradeSignal.direction === 'LONG'
+  1333→  1333→    ? `ЛОНГ @ ${formatTP(tradeSignal.entry)} | Стоп: ${formatTP(tradeSignal.stopLoss)} | Цель: ${formatTP(tradeSignal.takeProfit2)} | R:R ${tradeSignal.riskReward} | ${tradeSignal.holdDuration}`
+  1334→  1334→    : tradeSignal.direction === 'SHORT'
+  1335→  1335→    ? `ШОРТ @ ${formatTP(tradeSignal.entry)} | Стоп: ${formatTP(tradeSignal.stopLoss)} | Цель: ${formatTP(tradeSignal.takeProfit2)} | R:R ${tradeSignal.riskReward} | ${tradeSignal.holdDuration}`
+  1336→  1336→    : 'Нет чёткого сигнала. Ожидайте подтверждения.';
+  1337→  1337→
+  1338→  1338→  const closes = data.map(d => d.close);
+  1339→  1339→  const currentPrice = closes[closes.length - 1];
+  1340→  1340→  const levels = findKeyLevels(data);
+  1341→  1341→
+  1342→  1342→  const forecast: PriceForecast = {
+  1343→  1343→    direction: tradeSignal.direction === 'LONG' ? 'UP' : tradeSignal.direction === 'SHORT' ? 'DOWN' : 'SIDEWAYS',
+  1344→  1344→    confidence: tradeSignal.confidence,
+  1345→  1345→    targetPrice: tradeSignal.takeProfit2,
+  1346→  1346→    supportLevel: tradeSignal.support,
+  1347→  1347→    resistanceLevel: tradeSignal.resistance,
+  1348→  1348→    shortTerm: tradeSignal.direction === 'LONG'
+  1349→  1349→      ? `Рост до ${formatTP(tradeSignal.takeProfit2)} за ${tradeSignal.holdDuration}`
+  1350→  1350→      : tradeSignal.direction === 'SHORT'
+  1351→  1351→      ? `Снижение до ${formatTP(tradeSignal.takeProfit2)} за ${tradeSignal.holdDuration}`
+  1352→  1352→      : 'Боковое движение, ждать сигнала',
+  1353→  1353→    mediumTerm: tradeSignal.trend === 'BULLISH' ? 'Восходящий тренд' : tradeSignal.trend === 'BEARISH' ? 'Нисходящий тренд' : 'Флэт',
+  1354→  1354→    longTerm: tradeSignal.momentum === 'STRONG' ? 'Сильный импульс' : 'Умеренное движение',
+  1355→  1355→  };
+  1356→  1356→
+  1357→  1357→  return {
+  1358→  1358→    type,
+  1359→  1359→    strength,
+  1360→  1360→    indicators: tradeSignal.indicators,
+  1361→  1361→    summary,
+  1362→  1362→    forecast,
+  1363→  1363→    tradeSignal,
+  1364→  1364→  };
+  1365→  1365→}
+  1366→  1366→
+  1367→  1367→// ============================================
+  1368→  1368→// CHART DATA FORMATTING
+  1369→  1369→// ============================================
+  1370→  1370→
+  1371→  1371→export function formatChartData(data: OHLCV[]) {
+  1372→  1372→  const closes = data.map(d => d.close);
+  1373→  1373→  const ema9 = EMA(closes, 9);
+  1374→  1374→  const ema21 = EMA(closes, Math.min(21, Math.floor(closes.length * 0.7)));
+  1375→  1375→  const sma20 = SMA(closes, Math.min(20, Math.floor(closes.length * 0.7)));
+  1376→  1376→  const bbPeriod = Math.min(20, Math.floor(closes.length * 0.7));
+  1377→  1377→  const bb = bbPeriod >= 5 ? BollingerBands(closes, bbPeriod, 2) : { upper: [], middle: [], lower: [] };
+  1378→  1378→  const rsi = RSI(closes, 14);
+  1379→  1379→  const macd = MACD(closes);
+  1380→  1380→
+  1381→  1381→  return data.map((d, i) => ({
+  1382→  1382→    timestamp: d.timestamp,
+  1383→  1383→    date: new Date(d.timestamp).toLocaleDateString('ru-RU'),
+  1384→  1384→    time: new Date(d.timestamp).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+  1385→  1385→    open: d.open,
+  1386→  1386→    high: d.high,
+  1387→  1387→    low: d.low,
+  1388→  1388→    close: d.close,
+  1389→  1389→    volume: d.volume,
+  1390→  1390→    ema9: isNaN(ema9[i]) ? undefined : ema9[i],
+  1391→  1391→    ema21: isNaN(ema21[i]) ? undefined : ema21[i],
+  1392→  1392→    sma20: isNaN(sma20[i]) ? undefined : sma20[i],
+  1393→  1393→    bbUpper: isNaN(bb.upper[i]) ? undefined : bb.upper[i],
+  1394→  1394→    bbMiddle: isNaN(bb.middle[i]) ? undefined : bb.middle[i],
+  1395→  1395→    bbLower: isNaN(bb.lower[i]) ? undefined : bb.lower[i],
+  1396→  1396→    rsi: isNaN(rsi[i]) ? undefined : rsi[i],
+  1397→  1397→    macd: isNaN(macd.macd[i]) ? undefined : macd.macd[i],
+  1398→  1398→    macdSignal: isNaN(macd.signal[i]) ? undefined : macd.signal[i],
+  1399→  1399→    macdHist: isNaN(macd.histogram[i]) ? undefined : macd.histogram[i],
+  1400→  1400→  }));
+  1401→  1401→}
+  1402→  1402→
+  1403→  1403→function formatTP(price: number): string {
+  1404→  1404→  if (price >= 100) return price.toFixed(2);
+  1405→  1405→  if (price >= 1) return price.toFixed(3);
+  1406→  1406→  if (price >= 0.01) return price.toFixed(5);
+  1407→  1407→  return price.toFixed(8);
+  1408→  1408→}
+  1409→  1409→

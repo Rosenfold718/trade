@@ -1,0 +1,436 @@
+     1→'use client';
+     2→
+     3→import React, { useState, useEffect, useCallback, useRef } from 'react';
+     4→import {
+     5→  TrendingUp, TrendingDown, BarChart3, RefreshCw, Clock,
+     6→  LineChart, Shield, Eye, Brain, Crosshair, Gauge,
+     7→  Activity, TrendingDown as TDown, Loader2, AlertTriangle,
+     8→  ChevronUp, ChevronDown,
+     9→} from 'lucide-react';
+    10→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+    11→import { Badge } from '@/components/ui/badge';
+    12→import { Button } from '@/components/ui/button';
+    13→
+    14→// Trading components
+    15→import { CandlestickChart } from '@/components/trading/CandlestickChart';
+    16→import { CoinList } from '@/components/trading/CoinList';
+    17→import { SignalPanel } from '@/components/trading/SignalPanel';
+    18→import { TradeTerminalModal } from '@/components/trading/TradeTerminalModal';
+    19→import { ReputationPanel } from '@/components/trading/ReputationPanel';
+    20→import { ThinkingPanel } from '@/components/trading/ThinkingPanel';
+    21→import { SentimentPanel } from '@/components/trading/SentimentPanel';
+    22→import { PositionToolPanel } from '@/components/trading/PositionTool';
+    23→import { AdvisorPanel } from '@/components/trading/AdvisorPanel';
+    24→
+    25→// Types & utils
+    26→import type {
+    27→  CoinData, SignalResult, TradeSignal, ChartDataPoint,
+    28→  PositionTool, SentimentData, Trade, ReputationData,
+    29→} from '@/components/trading/types';
+    30→import { formatPrice, formatNumber, formatTimeAgo } from '@/components/trading/types';
+    31→
+    32→// ============================================
+    33→// Sub-charts (RSI + MACD) — kept inline as they are small
+    34→// ============================================
+    35→function MiniLineChart({ data, color, yMin, yMax, refLines }: { data: number[]; color: string; yMin: number; yMax: number; refLines?: number[] }) {
+    36→  if (data.length < 2) return <div className="h-[110px] flex items-center justify-center text-muted-foreground text-xs">—</div>;
+    37→  const w = 500, h = 110, margin = { top: 5, right: 35, bottom: 5, left: 5 };
+    38→  const cw = w - margin.left - margin.right, ch = h - margin.top - margin.bottom;
+    39→  const range = yMax - yMin || 1;
+    40→  const yS = (v: number) => margin.top + ch - ((v - yMin) / range) * ch;
+    41→  const xS = (i: number) => margin.left + (i / (data.length - 1)) * cw;
+    42→  return (
+    43→    <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="w-full" preserveAspectRatio="xMidYMid meet">
+    44→      {refLines?.map((v, i) => <g key={i}><line x1={margin.left} y1={yS(v)} x2={margin.left + cw} y2={yS(v)} stroke={v > 50 ? '#ef4444' : '#10b981'} strokeWidth={0.5} strokeDasharray="3 3" opacity={0.5} /><text x={margin.left + cw + 3} y={yS(v) + 3} fontSize={7} fill={v > 50 ? '#ef4444' : '#10b981'}>{v}</text></g>)}
+    45→      <path d={data.map((v, i) => `${i === 0 ? 'M' : 'L'}${xS(i)},${yS(v)}`).join(' ')} fill="none" stroke={color} strokeWidth={1.5} />
+    46→      {data.length > 0 && <text x={margin.left + cw + 3} y={yS(data[data.length - 1]) + 3} fontSize={8} fill={color} fontWeight="bold">{data[data.length - 1].toFixed(1)}</text>}
+    47→    </svg>
+    48→  );
+    49→}
+    50→
+    51→function MiniMACDChart({ data }: { data: ChartDataPoint[] }) {
+    52→  const hist = data.map(d => d.macdHist).filter(v => v != null) as number[];
+    53→  const macd = data.map(d => d.macd).filter(v => v != null) as number[];
+    54→  const sig = data.map(d => d.macdSignal).filter(v => v != null) as number[];
+    55→  if (hist.length < 2) return <div className="h-[110px] flex items-center justify-center text-muted-foreground text-xs">—</div>;
+    56→  const w = 500, h = 110, margin = { top: 5, right: 40, bottom: 5, left: 5 };
+    57→  const cw = w - margin.left - margin.right, ch = h - margin.top - margin.bottom;
+    58→  const all = [...macd, ...sig, ...hist], maxAbs = Math.max(Math.abs(Math.min(...all)), Math.abs(Math.max(...all))) || 1, yR = maxAbs * 1.2;
+    59→  const yS = (v: number) => margin.top + ch / 2 - (v / yR) * (ch / 2);
+    60→  const xS = (i: number, t: number) => margin.left + (i / (t - 1)) * cw;
+    61→  const bw = Math.max(1, (cw / hist.length) * 0.6);
+    62→  return (
+    63→    <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="w-full" preserveAspectRatio="xMidYMid meet">
+    64→      <line x1={margin.left} y1={yS(0)} x2={margin.left + cw} y2={yS(0)} stroke="hsl(var(--muted-foreground))" strokeWidth={0.5} opacity={0.3} />
+    65→      {hist.map((v, i) => <rect key={i} x={xS(i, hist.length) - bw / 2} y={v >= 0 ? yS(v) : yS(0)} width={bw} height={Math.abs(yS(v) - yS(0))} fill={v >= 0 ? '#10b981' : '#ef4444'} opacity={0.4} />)}
+    66→      {macd.length > 1 && <path d={macd.map((v, i) => `${i === 0 ? 'M' : 'L'}${xS(i, macd.length)},${yS(v)}`).join(' ')} fill="none" stroke="#3b82f6" strokeWidth={1.2} />}
+    67→      {sig.length > 1 && <path d={sig.map((v, i) => `${i === 0 ? 'M' : 'L'}${xS(i, sig.length)},${yS(v)}`).join(' ')} fill="none" stroke="#ef4444" strokeWidth={1.2} />}
+    68→    </svg>
+    69→  );
+    70→}
+    71→
+    72→// ============================================
+    73→// MAIN DASHBOARD
+    74→// ============================================
+    75→export default function CryptoDashboard() {
+    76→  // ---- State ----
+    77→  const [coins, setCoins] = useState<CoinData[]>([]);
+    78→  const [selectedCoin, setSelectedCoin] = useState('bitcoin');
+    79→  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
+    80→  const [signal, setSignal] = useState<SignalResult | null>(null);
+    81→  const [tradeSignal, setTradeSignal] = useState<TradeSignal | null>(null);
+    82→  const [loading, setLoading] = useState(true);
+    83→  const [chartLoading, setChartLoading] = useState(false);
+    84→  const [interval, setInterval_] = useState('1h');
+    85→  const [searchQuery, setSearchQuery] = useState('');
+    86→  const [apiSource, setApiSource] = useState('');
+    87→  const [lastUpdate, setLastUpdate] = useState(Date.now());
+    88→  const [sentiment, setSentiment] = useState<SentimentData | null>(null);
+    89→  const [showIndicators, setShowIndicators] = useState(true);
+    90→  const [positionTool, setPositionTool] = useState<PositionTool>({ enabled: false, direction: 'LONG', entryPrice: 0, targetPrice: 0, stopLoss: 0, amount: 100, leverage: 1 });
+    91→  const [copied, setCopied] = useState(false);
+    92→  const [advisorAnalysis, setAdvisorAnalysis] = useState<string | null>(null);
+    93→  const [advisorLoading, setAdvisorLoading] = useState(false);
+    94→  const [advisorVisible, setAdvisorVisible] = useState(false);
+    95→  const [reputation, setReputation] = useState<ReputationData | null>(null);
+    96→  const [showReputationPanel, setShowReputationPanel] = useState(false);
+    97→  const [selectedTrade, setSelectedTrade] = useState<Trade | null>(null);
+    98→  const [depositAmount, setDepositAmount] = useState<string>('');
+    99→  const [depositLoading, setDepositLoading] = useState(false);
+   100→  const [scanResult, setScanResult] = useState<{ opportunities: any[] } | null>(null);
+   101→  const [scanLoading, setScanLoading] = useState(false);
+   102→  const [traderThinking, setTraderThinking] = useState<any>(null);
+   103→  const [showThinkingPanel, setShowThinkingPanel] = useState(false);
+   104→  const lastRecordedSignal = useRef<string>('');
+   105→  const abortRef = useRef<AbortController | null>(null);
+   106→
+   107→  // ---- Derived ----
+   108→  const selectedCoinData = coins.find(c => c.id === selectedCoin);
+   109→  const priceChange24h = selectedCoinData?.price_change_percentage_24h || 0;
+   110→  const displayPrice = selectedCoinData?.current_price || chartData[chartData.length - 1]?.close || 0;
+   111→  const ts = tradeSignal;
+   112→
+   113→  // ---- API Calls ----
+   114→  const fetchMarketData = useCallback(async () => {
+   115→    try { const res = await fetch('/api/crypto/market'); if (res.ok) { const json = await res.json(); setCoins(json.data || []); setApiSource(json.source || ''); setLastUpdate(Date.now()); } } catch {} finally { setLoading(false); }
+   116→  }, []);
+   117→
+   118→  const fetchChartData = useCallback(async () => {
+   119→    if (!selectedCoin) return;
+   120→    if (abortRef.current) abortRef.current.abort();
+   121→    abortRef.current = new AbortController();
+   122→    setChartLoading(true);
+   123→    try {
+   124→      const res = await fetch(`/api/crypto/signals?coin=${selectedCoin}&interval=${interval}`, { signal: abortRef.current.signal });
+   125→      if (!res.ok) { setChartData([]); setSignal({ type: 'HOLD', strength: 0, indicators: [], summary: 'Данные недоступны' }); setTradeSignal(null); return; }
+   126→      const json = await res.json();
+   127→      setChartData(json.chartData || []);
+   128→      setSignal(json.signal || null);
+   129→      setTradeSignal(json.tradeSignal || null);
+   130→      setApiSource(json.source || apiSource);
+   131→    } catch { setChartData([]); setTradeSignal(null); } finally { setChartLoading(false); }
+   132→  }, [selectedCoin, interval, apiSource]);
+   133→
+   134→  const fetchSentiment = useCallback(async () => {
+   135→    try { const res = await fetch('/api/crypto/sentiment'); if (res.ok) setSentiment(await res.json()); } catch {}
+   136→  }, []);
+   137→
+   138→  const fetchReputation = useCallback(async () => {
+   139→    try { const res = await fetch('/api/crypto/reputation'); if (res.ok) setReputation(await res.json()); } catch {}
+   140→  }, []);
+   141→
+   142→  const recordThought = useCallback(async (thought: any) => {
+   143→    try { await fetch('/api/crypto/trader-thinking', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(thought) }); } catch {}
+   144→  }, []);
+   145→
+   146→  const fetchThinking = useCallback(async () => {
+   147→    try { const res = await fetch('/api/crypto/trader-thinking'); if (res.ok) setTraderThinking(await res.json()); } catch {}
+   148→  }, []);
+   149→
+   150→  const depositFunds = useCallback(async () => {
+   151→    const amount = parseFloat(depositAmount);
+   152→    if (!amount || amount <= 0) return;
+   153→    setDepositLoading(true);
+   154→    try {
+   155→      const res = await fetch('/api/crypto/reputation', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount, label: `Кредит #${(reputation?.debtHistory?.length || 0) + 1}` }) });
+   156→      if (res.ok) { setDepositAmount(''); fetchReputation(); }
+   157→    } catch {} finally { setDepositLoading(false); }
+   158→  }, [depositAmount, fetchReputation, reputation]);
+   159→
+   160→  const deleteTrade = useCallback(async (tradeId: string) => {
+   161→    try { const res = await fetch('/api/crypto/reputation', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tradeId }) }); if (res.ok) fetchReputation(); } catch {}
+   162→  }, [fetchReputation]);
+   163→
+   164→  const recordSignal = useCallback(async (tsig: TradeSignal, coinId: string, coinSymbol: string) => {
+   165→    if (!tsig || tsig.direction === 'FLAT') return;
+   166→    try {
+   167→      await fetch('/api/crypto/reputation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ coinId, coinSymbol, direction: tsig.direction, entryType: tsig.entryType || 'LIMIT', entry: tsig.entry, stopLoss: tsig.stopLoss, takeProfit1: tsig.takeProfit1, takeProfit2: tsig.takeProfit2, takeProfit3: tsig.takeProfit3, currentPrice: tsig.currentPrice, confidence: tsig.confidence, timeframe: interval, entryReason: tsig.entryReason || '', reasons: tsig.reasons || [], leverage: 3 }) });
+   168→      fetchReputation();
+   169→    } catch {}
+   170→  }, [fetchReputation, interval]);
+   171→
+   172→  const fetchAdvisor = useCallback(async () => {
+   173→    if (!tradeSignal || !selectedCoin) return;
+   174→    setAdvisorLoading(true); setAdvisorVisible(true);
+   175→    try {
+   176→      const indicatorStr = signal?.indicators?.map(i => `${i.name}: ${i.value} (${i.signal}) ${i.description}`).join('; ') || '';
+   177→      const params = new URLSearchParams({ coin: selectedCoin, direction: tradeSignal.direction, confidence: String(tradeSignal.confidence), entry: String(tradeSignal.entry), stopLoss: String(tradeSignal.stopLoss), tp1: String(tradeSignal.takeProfit1), tp2: String(tradeSignal.takeProfit2), tp3: String(tradeSignal.takeProfit3), trend: tradeSignal.trend, momentum: tradeSignal.momentum, reasons: tradeSignal.reasons.join('; '), warnings: tradeSignal.warnings.join('; '), candlePattern: tradeSignal.candlePattern || '', volumeSignal: tradeSignal.volumeSignal || '', support: String(tradeSignal.support), resistance: String(tradeSignal.resistance), atr: String(tradeSignal.atr), holdDuration: tradeSignal.holdDuration, indicators: indicatorStr });
+   178→      const res = await fetch(`/api/crypto/advisor?${params}`);
+   179→      if (res.ok) setAdvisorAnalysis((await res.json()).analysis || null);
+   180→      else setAdvisorAnalysis('Не удалось получить анализ. Попробуйте позже.');
+   181→    } catch { setAdvisorAnalysis('Ошибка подключения к AI-советчику.'); } finally { setAdvisorLoading(false); }
+   182→  }, [tradeSignal, selectedCoin, signal]);
+   183→
+   184→  // ---- Auto-trader: scanAndTrade ----
+   185→  const scanAndTrade = useCallback(async () => {
+   186→    setScanLoading(true);
+   187→    try {
+   188→      let repData: any = null;
+   189→      try { const repRes = await fetch('/api/crypto/reputation'); if (repRes.ok) repData = await repRes.json(); } catch {}
+   190→      const freeBalance = repData?.freeBalance || 0;
+   191→      const openPositions = (repData?.trades || []).filter((t: any) => !t.resolved).length;
+   192→      const lockedMargin = repData?.lockedInPositions || 0;
+   193→
+   194→      const res = await fetch('/api/crypto/scan');
+   195→      if (!res.ok) { await recordThought({ type: 'scan', title: 'Скан рынка не удался', detail: 'Не удалось получить данные сканера.', emotion: 'worried', tags: ['error', 'scan'], openPositionsCount: openPositions, freeBalance, totalEquity: freeBalance + lockedMargin }); return; }
+   196→      const data = await res.json(); setScanResult(data);
+   197→      const allOpps = data.opportunities || [];
+   198→      const minConfidence = data.adaptiveRules?.minConfidence || 60;
+   199→      const minRr = data.adaptiveRules?.minRr || 1.5;
+   200→      const bullishOpps = allOpps.filter((o: any) => o.direction === 'LONG');
+   201→      const bearishOpps = allOpps.filter((o: any) => o.direction === 'SHORT');
+   202→      const marketView = bullishOpps.length > bearishOpps.length * 1.5 ? 'Бычий' : bearishOpps.length > bullishOpps.length * 1.5 ? 'Медвежий' : 'Нейтральный';
+   203→
+   204→      await recordThought({ type: 'scan', title: `Скан: ${allOpps.length} сигналов (${bullishOpps.length} LONG, ${bearishOpps.length} SHORT)`, detail: `Рынок: ${marketView}. Свободных: $${freeBalance.toFixed(2)}. Открытых: ${openPositions}/5.`, emotion: allOpps.length > 0 ? 'analytical' : 'cautious', tags: ['scan', 'market_analysis'], marketView, openPositionsCount: openPositions, freeBalance, totalEquity: freeBalance + lockedMargin });
+   205→
+   206→      const maxPositions = 5, slotsAvailable = maxPositions - openPositions;
+   207→      if (slotsAvailable <= 0) { await recordThought({ type: 'decision', title: 'Максимум позиций', detail: `Уже ${openPositions} позиций.`, emotion: 'cautious', tags: ['max_positions', 'wait'], openPositionsCount: openPositions, freeBalance, totalEquity: freeBalance + lockedMargin }); return; }
+   208→      if (freeBalance < 3) { await recordThought({ type: 'decision', title: 'Недостаточно средств', detail: `Баланс $${freeBalance.toFixed(2)} — слишком мало.`, emotion: 'worried', tags: ['low_balance'], openPositionsCount: openPositions, freeBalance, totalEquity: freeBalance + lockedMargin }); return; }
+   209→
+   210→      const validOpps = allOpps.filter((o: any) => o.confidence >= minConfidence * 0.7 && o.score >= 25 && o.riskReward >= minRr * 0.7);
+   211→      if (validOpps.length === 0) { await recordThought({ type: 'decision', title: 'Нет подходящих сигналов', detail: `Из ${allOpps.length} ни один не прошёл фильтры.`, emotion: 'cautious', tags: ['no_signals'], openPositionsCount: openPositions, freeBalance, totalEquity: freeBalance + lockedMargin }); return; }
+   212→
+   213→      let openedCount = 0;
+   214→      const maxToTry = Math.min(slotsAvailable, 3);
+   215→      for (const opp of validOpps.slice(0, maxToTry + 2)) {
+   216→        if (openedCount >= maxToTry || freeBalance - openedCount * (freeBalance * 0.12) < 3) break;
+   217→        const isMarketPreferred = opp.confidence >= 75 || Math.abs(opp.price - opp.entry) / opp.price * 100 < 0.15 || (opp.reasons || []).some((r: string) => r.includes('пробой') || r.includes('breakout'));
+   218→        try {
+   219→          const tradeRes = await fetch('/api/crypto/reputation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ coinId: opp.coinId, coinSymbol: opp.symbol, direction: opp.direction, entryType: isMarketPreferred ? 'MARKET' : 'LIMIT', entry: opp.entry, stopLoss: opp.stopLoss, takeProfit1: opp.takeProfit1, takeProfit2: opp.direction === 'LONG' ? opp.takeProfit1 + (opp.takeProfit1 - opp.entry) * 0.5 : opp.takeProfit1 - (opp.entry - opp.takeProfit1) * 0.5, takeProfit3: opp.direction === 'LONG' ? opp.takeProfit1 + (opp.takeProfit1 - opp.entry) : opp.takeProfit1 - (opp.entry - opp.takeProfit1), currentPrice: opp.price, confidence: opp.confidence, timeframe: opp.timeframe, entryReason: opp.entryReason, reasons: opp.reasons, leverage: 3 }) });
+   220→          if (tradeRes.ok) { const td = await tradeRes.json(); if (td.success) { openedCount++; await recordThought({ type: 'decision', title: `ОТКРЫТА: ${opp.symbol} ${opp.direction}`, detail: `${isMarketPreferred ? 'РЫНОК' : 'ЛИМИТ'} conf:${opp.confidence}% R:R:${opp.riskReward?.toFixed(2)}`, coinSymbol: opp.symbol, coinId: opp.coinId, direction: opp.direction, confidence: opp.confidence, score: opp.score, tradeId: td.tradeId, entryType: isMarketPreferred ? 'MARKET' : 'LIMIT', emotion: opp.confidence >= 75 ? 'confident' : 'analytical', tags: ['open_position'], openPositionsCount: openPositions + openedCount, freeBalance: freeBalance - openedCount * (freeBalance * 0.12), totalEquity: freeBalance + lockedMargin }); } } fetchReputation();
+   221→        } catch {}
+   222→      }
+   223→      if (openedCount > 0) await recordThought({ type: 'observation', title: `Цикл: открыто ${openedCount}`, detail: `Рынок: ${marketView}`, emotion: openedCount >= 2 ? 'confident' : 'satisfied', tags: ['cycle_summary'], openPositionsCount: openPositions + openedCount, freeBalance, totalEquity: freeBalance + lockedMargin, marketView });
+   224→    } catch {} finally { setScanLoading(false); }
+   225→  }, [fetchReputation, recordThought]);
+   226→
+   227→  // ---- Copy trade ----
+   228→  const copyTrade = useCallback(() => {
+   229→    if (!ts || ts.direction === 'FLAT') return;
+   230→    const text = `${ts.direction === 'LONG' ? '🟢 ЛОНГ' : '🔴 ШОРТ'} ${(selectedCoinData?.symbol || selectedCoin).toUpperCase()}/USDT\n📊 Уверенность: ${ts.confidence}%\n💰 Вход: $${formatPrice(ts.entry)}\n🛑 Стоп: $${formatPrice(ts.stopLoss)}\n🎯 TP1: $${formatPrice(ts.takeProfit1)}\n🎯 TP2: $${formatPrice(ts.takeProfit2)}\n📐 R:R = ${ts.riskReward.toFixed(2)}\n⏱ ${ts.holdDuration}\n✅ ${ts.reasons.slice(0, 3).join(' | ')}`;
+   231→    navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+   232→  }, [ts, selectedCoinData, selectedCoin]);
+   233→
+   234→  // ---- Effects ----
+   235→  useEffect(() => { fetchMarketData(); fetchSentiment(); fetchReputation(); }, [fetchMarketData, fetchSentiment, fetchReputation]);
+   236→  useEffect(() => { fetchChartData(); }, [fetchChartData]);
+   237→  useEffect(() => {
+   238→    if (tradeSignal && tradeSignal.direction !== 'FLAT') {
+   239→      const sigKey = `${selectedCoin}-${tradeSignal.direction}-${tradeSignal.entry.toFixed(2)}-${tradeSignal.confidence}`;
+   240→      if (sigKey !== lastRecordedSignal.current) { lastRecordedSignal.current = sigKey; const sym = coins.find(c => c.id === selectedCoin)?.symbol || selectedCoin.toUpperCase(); recordSignal(tradeSignal, selectedCoin, sym); }
+   241→    }
+   242→  }, [tradeSignal?.direction, tradeSignal?.entry, selectedCoin]);
+   243→  useEffect(() => { const iv = setInterval(() => { fetchMarketData(); fetchChartData(); fetchSentiment(); fetchReputation(); fetchThinking(); }, 45000); return () => clearInterval(iv); }, [fetchMarketData, fetchChartData, fetchSentiment, fetchReputation, fetchThinking]);
+   244→  useEffect(() => { scanAndTrade(); fetchThinking(); const iv = setInterval(scanAndTrade, 60000); return () => clearInterval(iv); }, [scanAndTrade, fetchThinking]);
+   245→
+   246→  // Auto-sync position tool with new signals
+   247→  useEffect(() => {
+   248→    if (tradeSignal && tradeSignal.direction !== 'FLAT' && positionTool.enabled) {
+   249→      const entry = tradeSignal.currentPrice || tradeSignal.entry;
+   250→      if (entry > 0) {
+   251→        const isLong = tradeSignal.direction !== 'SHORT';
+   252→        setPositionTool(p => ({ ...p, entryPrice: entry, targetPrice: tradeSignal.takeProfit2 || entry * (isLong ? 1.05 : 0.95), stopLoss: tradeSignal.stopLoss || entry * (isLong ? 0.97 : 1.03) }));
+   253→      }
+   254→    }
+   255→  }, [selectedCoin, interval]);
+   256→
+   257→  // Toggle position tool
+   258→  const togglePositionTool = useCallback(() => {
+   259→    if (positionTool.enabled) { setPositionTool(p => ({ ...p, enabled: false })); }
+   260→    else { const entry = displayPrice || 0; const isLong = ts?.direction !== 'SHORT'; setPositionTool({ enabled: true, direction: isLong ? 'LONG' : 'SHORT', entryPrice: entry, targetPrice: ts?.takeProfit2 || entry * (isLong ? 1.05 : 0.95), stopLoss: ts?.stopLoss || entry * (isLong ? 0.97 : 1.03), amount: 100, leverage: 1 }); }
+   261→  }, [positionTool.enabled, displayPrice, ts]);
+   262→
+   263→  // Convert tradeSignal to chart-compatible format
+   264→  const chartTradeSignal = ts ? {
+   265→    direction: ts.direction, entry: ts.entry, stopLoss: ts.stopLoss,
+   266→    takeProfit1: ts.takeProfit1, takeProfit2: ts.takeProfit2, takeProfit3: ts.takeProfit3,
+   267→    confidence: ts.confidence, trend: ts.trend, momentum: ts.momentum,
+   268→    entryType: ts.entryType, riskReward: ts.riskReward, holdDuration: ts.holdDuration,
+   269→    support: ts.support, resistance: ts.resistance, candlePattern: ts.candlePattern,
+   270→  } : null;
+   271→
+   272→  // ============================================
+   273→  // RENDER
+   274→  // ============================================
+   275→  return (
+   276→    <div className="min-h-screen bg-background">
+   277→      {/* Header */}
+   278→      <header className="sticky top-0 z-50 bg-card/80 backdrop-blur-xl border-b border-border">
+   279→        <div className="max-w-[1700px] mx-auto px-4 py-2.5 flex items-center justify-between gap-4">
+   280→          <div className="flex items-center gap-3">
+   281→            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center"><BarChart3 className="w-5 h-5 text-white" /></div>
+   282→            <div><h1 className="text-lg font-bold tracking-tight">IntraTrade Pro</h1><p className="text-[10px] text-muted-foreground">Внутридневной торговый терминал</p></div>
+   283→          </div>
+   284→          <div className="flex items-center gap-3">
+   285→            {reputation && (
+   286→              <button onClick={() => setShowReputationPanel(!showReputationPanel)} className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-purple-500/30 bg-purple-500/5 hover:bg-purple-500/10 transition-colors cursor-pointer">
+   287→                <span className="text-sm">{reputation.levelEmoji}</span>
+   288→                <span className="text-[10px] font-bold text-purple-500">{reputation.level}</span>
+   289→                <span className="text-[10px] font-mono font-bold text-foreground">${(reputation.freeBalance + (reputation.lockedInPositions || 0)).toFixed(0)}</span>
+   290→                <span className={`text-[9px] font-mono font-bold ${reputation.totalPnl >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+   291→                  {reputation.totalPnl >= 0 ? '+' : ''}{(((reputation.freeBalance + (reputation.lockedInPositions || 0)) / reputation.initialDeposit - 1) * 100).toFixed(0)}%
+   292→                </span>
+   293→                {reputation.streak !== 0 && <span className={`text-[9px] font-bold ${reputation.streak > 0 ? 'text-emerald-500' : 'text-red-500'}`}>{reputation.streak > 0 ? `${reputation.streak}W` : `${Math.abs(reputation.streak)}L`}</span>}
+   294→              </button>
+   295→            )}
+   296→            <button onClick={() => setShowThinkingPanel(!showThinkingPanel)} className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border transition-colors cursor-pointer ${showThinkingPanel ? 'border-amber-500/50 bg-amber-500/10' : 'border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10'}`}>
+   297→              <Brain className="w-3.5 h-3.5 text-amber-500" />
+   298→              <span className="text-[10px] font-bold text-amber-500">Мышление</span>
+   299→              {traderThinking?.thoughts?.length > 0 && <span className="text-[9px] font-mono text-amber-400">{traderThinking.thoughts.length}</span>}
+   300→            </button>
+   301→            {ts && ts.direction !== 'FLAT' && (
+   302→              <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full border ${ts.direction === 'LONG' ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-red-500/50 bg-red-500/10'}`}>
+   303→                {ts.direction === 'LONG' ? <TrendingUp className="w-4 h-4 text-emerald-500" /> : <TrendingDown className="w-4 h-4 text-red-500" />}
+   304→                <span className={`text-sm font-bold ${ts.direction === 'LONG' ? 'text-emerald-500' : 'text-red-500'}`}>{ts.direction === 'LONG' ? 'ЛОНГ' : 'ШОРТ'}</span>
+   305→                <span className="text-xs text-muted-foreground">{ts.confidence}%</span>
+   306→              </div>
+   307→            )}
+   308→            {sentiment && <div className="hidden md:flex items-center gap-1.5 text-xs"><Gauge className="w-4 h-4 text-orange-500" /><span className="text-orange-500">{sentiment.fearGreed.value}</span></div>}
+   309→            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground"><Clock className="w-3 h-3" />{formatTimeAgo(lastUpdate)}</div>
+   310→            <Button variant="outline" size="sm" onClick={() => { fetchMarketData(); fetchChartData(); fetchSentiment(); }} className="gap-1 h-7"><RefreshCw className="w-3 h-3" /></Button>
+   311→          </div>
+   312→        </div>
+   313→      </header>
+   314→
+   315→      <main className="max-w-[1700px] mx-auto px-4 py-3">
+   316→        <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-3">
+   317→          {/* Left: Coin List */}
+   318→          <CoinList coins={coins} selectedCoin={selectedCoin} onSelectCoin={setSelectedCoin} searchQuery={searchQuery} onSearchChange={setSearchQuery} loading={loading} />
+   319→
+   320→          {/* Main Panel */}
+   321→          <div className="space-y-3">
+   322→            {/* Signal Banner */}
+   323→            <SignalPanel signal={signal} tradeSignal={ts} showIndicators={showIndicators} onToggleIndicators={() => setShowIndicators(!showIndicators)} coinSymbol={selectedCoinData?.symbol || selectedCoin} copied={copied} onCopy={copyTrade} />
+   324→
+   325→            {/* Coin Info + MTF */}
+   326→            <div className="grid grid-cols-1 md:grid-cols-[1fr_280px] gap-3">
+   327→              <Card><CardContent className="p-3"><div className="flex flex-wrap items-center gap-3">
+   328→                <div className="flex items-center gap-2"><div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center overflow-hidden">{selectedCoinData?.image ? <img src={selectedCoinData.image} alt="" className="w-7 h-7" /> : <span className="text-sm font-bold">{(selectedCoinData?.symbol || '??').slice(0, 2)}</span>}</div><div><h2 className="text-base font-bold">{selectedCoinData?.name || selectedCoin}</h2><span className="text-[10px] text-muted-foreground uppercase">{selectedCoinData?.symbol || selectedCoin}/USDT</span></div></div>
+   329→                <div className="flex items-baseline gap-2"><span className="text-xl font-bold font-mono">${formatPrice(displayPrice)}</span>{selectedCoinData && <span className={`text-xs font-semibold flex items-center gap-0.5 ${priceChange24h >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{priceChange24h >= 0 ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}{Math.abs(priceChange24h).toFixed(2)}%</span>}</div>
+   330→                <div className="flex gap-3 ml-auto text-[10px]">{selectedCoinData?.market_cap ? <div className="text-center"><div className="text-muted-foreground">Кап.</div><div className="font-mono font-semibold">{formatNumber(selectedCoinData.market_cap)}</div></div> : null}{ts && ts.atr > 0 && <div className="text-center"><div className="text-muted-foreground">ATR</div><div className="font-mono text-blue-500">${formatPrice(ts.atr)}</div></div>}{ts && <div className="text-center"><div className="text-muted-foreground">Подд</div><div className="font-mono text-emerald-500">${formatPrice(ts.support)}</div></div>}{ts && <div className="text-center"><div className="text-muted-foreground">Сопр</div><div className="font-mono text-red-500">${formatPrice(ts.resistance)}</div></div>}</div>
+   331→              </div></CardContent></Card>
+   332→
+   333→              {ts && (
+   334→                <Card><CardHeader className="px-3 py-2"><CardTitle className="text-xs flex items-center gap-1.5"><Shield className="w-3.5 h-3.5 text-blue-500" />Мульти-ТФ<Badge variant="outline" className="text-[8px] ml-1">{ts.multiTimeframe.alignment}%</Badge></CardTitle></CardHeader>
+   335→                <CardContent className="px-3 pb-3 pt-0">
+   336→                  <div className="grid grid-cols-4 gap-1">{(['m5', 'm15', 'h1', 'h4'] as const).map(tf => { const v = ts.multiTimeframe[tf]; return (
+   337→                    <div key={tf} className={`rounded-md border p-1.5 text-center ${v ? (v.direction === 'BULLISH' ? 'border-emerald-500/30 bg-emerald-500/5' : v.direction === 'BEARISH' ? 'border-red-500/30 bg-red-500/5' : 'border-border') : 'border-border opacity-40'}`}>
+   338→                      <div className="text-[9px] font-bold text-muted-foreground">{tf.toUpperCase()}</div>
+   339→                      {v ? <><div className={`text-xs font-bold ${v.direction === 'BULLISH' ? 'text-emerald-500' : v.direction === 'BEARISH' ? 'text-red-500' : 'text-yellow-500'}`}>{v.direction === 'BULLISH' ? '▲' : v.direction === 'BEARISH' ? '▼' : '→'}</div><div className="text-[8px] text-muted-foreground">{Math.abs(v.score)}</div></> : <div className="text-[9px] text-muted-foreground">—</div>}
+   340→                    </div>); })}</div>
+   341→                  <div className="mt-1.5 text-center"><Badge className={`text-[9px] ${ts.multiTimeframe.consensus.includes('LONG') ? 'bg-emerald-500' : ts.multiTimeframe.consensus.includes('SHORT') ? 'bg-red-500' : 'bg-yellow-500'} text-white`}>
+   342→                    {ts.multiTimeframe.consensus === 'STRONG_LONG' ? '⬆ СИЛЬНЫЙ ЛОНГ' : ts.multiTimeframe.consensus === 'LONG' ? '↑ ЛОНГ' : ts.multiTimeframe.consensus === 'STRONG_SHORT' ? '⬇ СИЛЬНЫЙ ШОРТ' : ts.multiTimeframe.consensus === 'SHORT' ? '↓ ШОРТ' : '→ НЕЙТРАЛЬНО'}
+   343→                  </Badge></div>
+   344→                </CardContent></Card>
+   345→              )}
+   346→            </div>
+   347→
+   348→            {/* Chart Controls */}
+   349→            <div className="flex items-center gap-2 flex-wrap">
+   350→              <div className="flex items-center gap-0.5 bg-card rounded-lg border border-border p-0.5">
+   351→                {[{ v: '1m', l: '1М' }, { v: '5m', l: '5М' }, { v: '15m', l: '15М' }, { v: '1h', l: '1Ч' }, { v: '4h', l: '4Ч' }].map(tf => (
+   352→                  <button key={tf.v} onClick={() => setInterval_(tf.v)} className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${interval === tf.v ? 'bg-primary text-primary-foreground' : 'hover:bg-accent text-muted-foreground'}`}>{tf.l}</button>
+   353→                ))}
+   354→              </div>
+   355→              <button onClick={() => setShowIndicators(!showIndicators)} className={`px-2 py-1 text-[11px] rounded-md border transition-colors ${showIndicators ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:bg-accent'}`}><LineChart className="w-3 h-3 inline mr-1" />Индикаторы</button>
+   356→              <button onClick={togglePositionTool} className={`px-2 py-1 text-[11px] rounded-md border transition-colors ${positionTool.enabled ? 'bg-blue-500 text-white border-blue-500' : 'border-border hover:bg-accent'}`}><Crosshair className="w-3 h-3 inline mr-1" />Позиция</button>
+   357→              <button onClick={() => fetchAdvisor()} className={`px-2 py-1 text-[11px] rounded-md border transition-colors ${advisorVisible ? 'bg-purple-500 text-white border-purple-500' : 'border-border hover:bg-accent'}`}><Brain className="w-3 h-3 inline mr-1" />AI Советчик</button>
+   358→            </div>
+   359→
+   360→            {/* Chart — TradingView */}
+   361→            <Card><CardContent className="p-2 sm:p-3">
+   362→              {chartLoading ? (
+   363→                <div className="h-[480px] flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-emerald-500" /><span className="ml-3 text-sm text-muted-foreground">Загрузка...</span></div>
+   364→              ) : chartData.length > 0 ? (
+   365→                <CandlestickChart data={chartData} tradeSignal={chartTradeSignal} height={480} showIndicators={showIndicators} />
+   366→              ) : (
+   367→                <div className="h-[480px] flex items-center justify-center text-muted-foreground"><div className="text-center"><BarChart3 className="w-10 h-10 mx-auto mb-2 opacity-30" /><p className="text-sm">Выберите монету</p></div></div>
+   368→              )}
+   369→            </CardContent></Card>
+   370→
+   371→            {/* Position Tool */}
+   372→            {positionTool.enabled && <PositionToolPanel tool={positionTool} onChange={setPositionTool} displayPrice={displayPrice} />}
+   373→
+   374→            {/* RSI & MACD */}
+   375→            {chartData.length > 0 && (
+   376→              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+   377→                <Card><CardHeader className="px-3 py-1.5"><CardTitle className="text-xs flex items-center gap-1.5"><Activity className="w-3.5 h-3.5 text-purple-500" />RSI (14){(() => { const lr = chartData.filter(d => d.rsi != null).slice(-1)[0]?.rsi; return lr != null ? <span className={`ml-auto font-mono text-sm ${lr < 30 ? 'text-emerald-500' : lr > 70 ? 'text-red-500' : 'text-muted-foreground'}`}>{lr.toFixed(1)}</span> : null; })()}</CardTitle></CardHeader><CardContent className="p-2 pt-0"><MiniLineChart data={chartData.map(d => d.rsi).filter(v => v != null) as number[]} color="#8b5cf6" yMin={0} yMax={100} refLines={[30, 70]} /></CardContent></Card>
+   378→                <Card><CardHeader className="px-3 py-1.5"><CardTitle className="text-xs flex items-center gap-1.5"><BarChart3 className="w-3.5 h-3.5 text-orange-500" />MACD</CardTitle></CardHeader><CardContent className="p-2 pt-0"><MiniMACDChart data={chartData} /></CardContent></Card>
+   379→              </div>
+   380→            )}
+   381→
+   382→            {/* AI Advisor */}
+   383→            <AdvisorPanel analysis={advisorAnalysis} loading={advisorLoading} visible={advisorVisible} onToggle={() => { setAdvisorVisible(false); setAdvisorAnalysis(null); }} onRefresh={fetchAdvisor} coinSymbol={selectedCoinData?.symbol || selectedCoin} direction={ts?.direction || null} confidence={ts?.confidence || null} />
+   384→
+   385→            {/* Indicators */}
+   386→            {signal && signal.indicators.length > 0 && (
+   387→              <Card><CardHeader className="px-3 py-2"><CardTitle className="text-xs flex items-center gap-1.5"><Shield className="w-3.5 h-3.5 text-blue-500" />Индикаторы</CardTitle></CardHeader>
+   388→              <CardContent className="px-3 pb-3 pt-0"><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">{signal.indicators.map((ind, i) => (
+   389→                <div key={i} className={`rounded-lg border p-2.5 ${ind.signal === 'BUY' ? 'border-emerald-500/30 bg-emerald-500/5' : ind.signal === 'SELL' ? 'border-red-500/30 bg-red-500/5' : 'border-border'}`}>
+   390→                  <div className="flex items-center justify-between mb-1"><span className="text-xs font-semibold">{ind.name}</span><Badge variant="outline" className={`text-[9px] ${ind.signal === 'BUY' ? 'text-emerald-500 border-emerald-500/30' : ind.signal === 'SELL' ? 'text-red-500 border-red-500/30' : 'text-yellow-500 border-yellow-500/30'}`}>{ind.signal === 'BUY' ? 'ПОКУПКА' : ind.signal === 'SELL' ? 'ПРОДАЖА' : 'НЕЙТР.'}</Badge></div>
+   391→                  <div className="text-[10px] font-mono text-muted-foreground">{ind.value}</div><div className="text-[10px] text-muted-foreground mt-0.5">{ind.description}</div>
+   392→                </div>))}</div></CardContent></Card>
+   393→            )}
+   394→
+   395→            {/* Top Movers */}
+   396→            {coins.length > 0 && (
+   397→              <Card><CardHeader className="px-3 py-2"><CardTitle className="text-xs flex items-center gap-1.5"><Eye className="w-3.5 h-3.5 text-cyan-500" />Топ движения 24ч</CardTitle></CardHeader>
+   398→              <CardContent className="px-3 pb-3 pt-0"><div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-1.5">{coins.filter(c => c.price_change_percentage_24h != null).sort((a, b) => Math.abs(b.price_change_percentage_24h) - Math.abs(a.price_change_percentage_24h)).slice(0, 16).map(coin => (
+   399→                <button key={coin.id} onClick={() => setSelectedCoin(coin.id)} className={`rounded-lg border p-2 text-left transition-all hover:shadow-sm ${selectedCoin === coin.id ? 'border-primary ring-1 ring-primary' : 'border-border'}`}>
+   400→                  <div className="flex items-center gap-1 mb-0.5"><div className="w-4 h-4 rounded-full bg-muted flex items-center justify-center overflow-hidden">{coin.image ? <img src={coin.image} alt="" className="w-3 h-3" /> : <span className="text-[6px] font-bold">{coin.symbol.slice(0, 2)}</span>}</div><span className="text-[10px] font-semibold truncate">{coin.symbol}</span></div>
+   401→                  <div className="text-[10px] font-mono">${formatPrice(coin.current_price)}</div>
+   402→                  <div className={`text-[10px] font-semibold flex items-center gap-0.5 ${(coin.price_change_percentage_24h || 0) >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{(coin.price_change_percentage_24h || 0) >= 0 ? <TrendingUp className="w-2.5 h-2.5" /> : <TDown className="w-2.5 h-2.5" />}{Math.abs(coin.price_change_percentage_24h || 0).toFixed(2)}%</div>
+   403→                </button>))}</div></CardContent></Card>
+   404→            )}
+   405→
+   406→            <div className="text-center text-[9px] text-muted-foreground/50 py-1"><AlertTriangle className="w-2.5 h-2.5 inline mr-0.5" />Не финансовая рекомендация. Торговля связана с риском.</div>
+   407→          </div>
+   408→        </div>
+   409→      </main>
+   410→
+   411→      {/* Modals */}
+   412→      {showReputationPanel && reputation && (
+   413→        <ReputationPanel
+   414→          reputation={reputation}
+   415→          onClose={() => setShowReputationPanel(false)}
+   416→          onDeleteTrade={deleteTrade}
+   417→          onTradeClick={setSelectedTrade}
+   418→          depositAmount={depositAmount}
+   419→          onDepositChange={setDepositAmount}
+   420→          onDepositSubmit={depositFunds}
+   421→          depositLoading={depositLoading}
+   422→          onScan={scanAndTrade}
+   423→          scanLoading={scanLoading}
+   424→        />
+   425→      )}
+   426→
+   427→      {showThinkingPanel && (
+   428→        <ThinkingPanel thinking={traderThinking} onClose={() => setShowThinkingPanel(false)} />
+   429→      )}
+   430→
+   431→      {selectedTrade && (
+   432→        <TradeTerminalModal trade={selectedTrade} coins={coins} onClose={() => setSelectedTrade(null)} />
+   433→      )}
+   434→    </div>
+   435→  );
+   436→}
