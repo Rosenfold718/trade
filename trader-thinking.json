@@ -1,0 +1,95 @@
+{
+  "thoughts": [
+    {
+      "id": "thought_1784392144010_zs74",
+      "timestamp": 1784392144010,
+      "type": "observation",
+      "title": "Цикл завершён: открыто 3 позиций",
+      "detail": "Открыты: ARB, PEPE, DOGE. . Рынок: Медвежий. Свободных средств осталось ~$64.00",
+      "emotion": "confident",
+      "tags": [
+        "cycle_summary",
+        "3_opened"
+      ]
+    },
+    {
+      "id": "thought_1784392143653_a0d2",
+      "timestamp": 1784392143653,
+      "type": "decision",
+      "title": "ОТКРЫТА позиция: DOGE SHORT",
+      "detail": "ЛИМИТНЫЙ вход на $0.07. Confidence: 67%, Score: 69, R:R: 2.50. SL: $0.07, TP1: $0.07. Причина: Откат к EMA21 — динамическое сопротивление",
+      "coinSymbol": "DOGE",
+      "coinId": "dogecoin",
+      "direction": "SHORT",
+      "confidence": 67,
+      "score": 69.256,
+      "tradeId": "trade_1784392143289_dnsrjq",
+      "entryType": "LIMIT",
+      "emotion": "analytical",
+      "tags": [
+        "open_position",
+        "short",
+        "limit"
+      ]
+    },
+    {
+      "id": "thought_1784392142974_d2da",
+      "timestamp": 1784392142974,
+      "type": "decision",
+      "title": "ОТКРЫТА позиция: PEPE SHORT",
+      "detail": "РЫНОЧНЫЙ вход на $0.00. Confidence: 61%, Score: 74, R:R: 2.50. SL: $0.00, TP1: $0.00. Причина: Откат к EMA21 — динамическое сопротивление",
+      "coinSymbol": "PEPE",
+      "coinId": "pepe",
+      "direction": "SHORT",
+      "confidence": 61,
+      "score": 74.4,
+      "tradeId": "trade_1784392142605_eeaspu",
+      "entryType": "MARKET",
+      "emotion": "analytical",
+      "tags": [
+        "open_position",
+        "short",
+        "market"
+      ]
+    },
+    {
+      "id": "thought_1784392142245_yz7h",
+      "timestamp": 1784392142245,
+      "type": "decision",
+      "title": "ОТКРЫТА позиция: ARB SHORT",
+      "detail": "РЫНОЧНЫЙ вход на $0.09. Confidence: 76%, Score: 82, R:R: 2.50. SL: $0.09, TP1: $0.09. Причина: Откат к EMA21 — динамическое сопротивление",
+      "coinSymbol": "ARB",
+      "coinId": "arbitrum",
+      "direction": "SHORT",
+      "confidence": 76,
+      "score": 82.40700000000001,
+      "tradeId": "trade_1784392141847_3ojah1",
+      "entryType": "MARKET",
+      "emotion": "confident",
+      "tags": [
+        "open_position",
+        "short",
+        "market"
+      ]
+    },
+    {
+      "id": "thought_1784392141477_gxua",
+      "timestamp": 1784392141477,
+      "type": "scan",
+      "title": "Скан: 25 сигналов (8 LONG, 17 SHORT)",
+      "detail": "Рынок: Медвежий. Свободных средств: $100.00. Открытых позиций: 0/5. Лучший сигнал: ARB (82 очков, SHORT)",
+      "emotion": "analytical",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    }
+  ],
+  "currentMood": "Анализ рынка",
+  "activeStrategy": "Внутридневная торговля с адаптивным входом",
+  "marketView": "Медвежий",
+  "lastScanAt": 1784392141478,
+  "openPositionsCount": 3,
+  "freeBalance": 64,
+  "totalEquity": 100
+}
