@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback, useReducer } from 'react';
-import { io, Socket } from 'socket.io-client';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -39,60 +38,98 @@ function pricesReducer(state: Map<string, PriceData>, action: Action): Map<strin
   return next;
 }
 
-// ─── Hook ────────────────────────────────────────────────────────────────────
+// ─── Binance WebSocket (direct — works on Vercel) ────────────────────────────
+
+const BINANCE_WS = 'wss://stream.binance.com:9443/stream';
 
 /**
- * Connects to the price-service via Socket.IO and maintains a live Map of prices.
- *
- * Usage:
- *   const { prices, connected, lastUpdate, subscribeToSymbols } = useRealtimePrices();
+ * Connects to Binance's public WebSocket directly from the browser.
+ * Maintains a live Map of prices for subscribed symbols.
+ * No server-side mini-service needed — works on Vercel, Netlify, etc.
  */
 export function useRealtimePrices(): RealtimePricesState & {
   subscribeToSymbols: (symbols: string[]) => void;
 } {
-  const socketRef = useRef<Socket | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(0);
   const [prices, dispatch] = useReducer(pricesReducer, new Map<string, PriceData>());
+  const subscribedRef = useRef<Set<string>>(new Set());
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const symbolsRef = useRef<string[]>([]);
+
+  const connectRef = useRef((syms: string[]) => {
+    if (wsRef.current) {
+      wsRef.current.onclose = null;
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    if (reconnectTimer.current) {
+      clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = null;
+    }
+    if (syms.length === 0) return;
+
+    symbolsRef.current = syms;
+    const streams = syms.map(s => `${s.toLowerCase()}@ticker`).join('/');
+    const ws = new WebSocket(`${BINANCE_WS}?streams=${streams}`);
+    wsRef.current = ws;
+
+    ws.onopen = () => setConnected(true);
+
+    ws.onmessage = (event) => {
+      try {
+        const wrapper = JSON.parse(event.data);
+        const msg = wrapper.data;
+        if (msg?.e === '24hrTicker') {
+          dispatch({
+            type: 'update',
+            data: {
+              symbol: msg.s,
+              price: msg.c,
+              change24h: msg.P,
+              high24h: msg.h,
+              low24h: msg.l,
+              volume: msg.v,
+              timestamp: msg.E,
+            },
+          });
+          setLastUpdate(Date.now());
+        }
+      } catch { /* ignore */ }
+    };
+
+    ws.onclose = () => {
+      setConnected(false);
+      wsRef.current = null;
+      const currentSymbols = [...symbolsRef.current];
+      reconnectTimer.current = setTimeout(() => {
+        if (!wsRef.current && currentSymbols.length > 0) {
+          connectRef.current(currentSymbols);
+        }
+      }, 3000);
+    };
+
+    ws.onerror = () => ws.close();
+  });
 
   const subscribeToSymbols = useCallback((symbols: string[]) => {
-    socketRef.current?.emit('subscribe:symbols', symbols);
+    const newSymbols = symbols.filter(s => !subscribedRef.current.has(s));
+    if (newSymbols.length === 0) return;
+
+    const allSymbols = [...subscribedRef.current, ...newSymbols];
+    subscribedRef.current = new Set(allSymbols);
+    connectRef.current(allSymbols);
   }, []);
 
   useEffect(() => {
-    const socket = io('/?XTransformPort=3003', {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 30000,
-    });
-
-    socketRef.current = socket;
-
-    socket.on('connect', () => {
-      setConnected(true);
-    });
-
-    socket.on('disconnect', () => {
-      setConnected(false);
-    });
-
-    // Receive initial snapshot of all cached prices
-    socket.on('price:snapshot', (data: PriceData[]) => {
-      dispatch({ type: 'snapshot', data });
-      setLastUpdate(Date.now());
-    });
-
-    // Receive individual price updates
-    socket.on('price:update', (data: PriceData) => {
-      dispatch({ type: 'update', data });
-      setLastUpdate(Date.now());
-    });
-
     return () => {
-      socket.disconnect();
-      socketRef.current = null;
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      if (wsRef.current) {
+        wsRef.current.onclose = null;
+        wsRef.current.close();
+        wsRef.current = null;
+      }
     };
   }, []);
 

@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState, useMemo } from 'react';
-import { io, Socket } from 'socket.io-client';
 import type { PriceData } from './useRealtimePrices';
 
 export interface RealtimePriceState {
@@ -11,20 +10,88 @@ export interface RealtimePriceState {
   low24h: string;
   volume: string;
   connected: boolean;
+  prevPrice: string;
 }
 
+const BINANCE_WS = 'wss://stream.binance.com:9443/ws';
+
 /**
- * Subscribes to a single symbol's real-time price.
- *
- * Usage:
- *   const { price, change24h, connected } = useRealtimePrice('BTCUSDT');
+ * Subscribes to a single symbol's real-time price via Binance public WebSocket.
+ * Works on Vercel / any deployment — no server-side mini-service needed.
  */
 export function useRealtimePrice(symbol: string): RealtimePriceState {
-  const socketRef = useRef<Socket | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
   const [data, setData] = useState<PriceData | null>(null);
+  const [prevPrice, setPrevPrice] = useState('0');
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const symbolRef = useRef(symbol);
 
-  // Memoize return value to avoid unnecessary re-renders
+  useEffect(() => {
+    symbolRef.current = symbol;
+  }, [symbol]);
+
+  const connectRef = useRef((sym: string) => {
+    if (wsRef.current) return;
+
+    const ws = new WebSocket(`${BINANCE_WS}/${sym.toLowerCase()}@ticker`);
+    wsRef.current = ws;
+
+    ws.onopen = () => setConnected(true);
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.e === '24hrTicker') {
+          setPrevPrice(prev => {
+            setData({
+              symbol: msg.s,
+              price: msg.c,
+              change24h: msg.P,
+              high24h: msg.h,
+              low24h: msg.l,
+              volume: msg.v,
+              timestamp: msg.E,
+            });
+            return prev || msg.c;
+          });
+        }
+      } catch { /* ignore */ }
+    };
+
+    ws.onclose = () => {
+      setConnected(false);
+      wsRef.current = null;
+      reconnectTimer.current = setTimeout(() => {
+        if (!wsRef.current) {
+          connectRef.current(symbolRef.current);
+        }
+      }, 3000);
+    };
+
+    ws.onerror = () => ws.close();
+  });
+
+  useEffect(() => {
+    if (!symbol) return;
+    // Close existing connection if symbol changed
+    if (wsRef.current) {
+      wsRef.current.onclose = null;
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    connectRef.current(symbol);
+    return () => {
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      if (wsRef.current) {
+        wsRef.current.onclose = null;
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      setConnected(false);
+    };
+  }, [symbol]);
+
   const result = useMemo<RealtimePriceState>(() => ({
     price: data?.price ?? '0',
     change24h: data?.change24h ?? '0',
@@ -32,53 +99,8 @@ export function useRealtimePrice(symbol: string): RealtimePriceState {
     low24h: data?.low24h ?? '0',
     volume: data?.volume ?? '0',
     connected,
-  }), [data, connected]);
-
-  useEffect(() => {
-    if (!symbol) return;
-
-    const socket = io('/?XTransformPort=3003', {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 30000,
-    });
-
-    socketRef.current = socket;
-
-    socket.on('connect', () => {
-      setConnected(true);
-      // Subscribe only to the requested symbol to save bandwidth
-      socket.emit('subscribe:symbols', [symbol]);
-    });
-
-    socket.on('disconnect', () => {
-      setConnected(false);
-    });
-
-    // Snapshot may contain our symbol
-    socket.on('price:snapshot', (items: PriceData[]) => {
-      for (const item of items) {
-        if (item.symbol === symbol) {
-          setData(item);
-          break;
-        }
-      }
-    });
-
-    // Individual update for our symbol
-    socket.on('price:update', (item: PriceData) => {
-      if (item.symbol === symbol) {
-        setData(item);
-      }
-    });
-
-    return () => {
-      socket.disconnect();
-      socketRef.current = null;
-    };
-  }, [symbol]);
+    prevPrice,
+  }), [data, connected, prevPrice]);
 
   return result;
 }

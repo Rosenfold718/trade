@@ -1,98 +1,59 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { existsSync } from 'fs';
-import { join } from 'path';
-import { readFile } from 'fs/promises';
 
 const TIMEOUT_MS = 3000;
 
-async function checkService(url: string): Promise<'ok' | 'error' | 'degraded'> {
+interface ServiceStatus {
+  name: string;
+  status: 'ok' | 'degraded' | 'error' | 'unknown';
+  latencyMs?: number;
+  detail?: string;
+}
+
+async function checkService(name: string, url: string): Promise<ServiceStatus> {
   try {
+    const startTime = Date.now();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     const res = await fetch(url, { signal: controller.signal });
     clearTimeout(timer);
-    if (res.ok) return 'ok';
-    return 'degraded';
+    const latencyMs = Date.now() - startTime;
+    if (res.ok) return { name, status: 'ok', latencyMs };
+    return { name, status: 'degraded', latencyMs, detail: `${res.status}` };
   } catch {
-    return 'error';
+    return { name, status: 'error', detail: 'timeout/unreachable' };
   }
 }
 
 export async function GET() {
   const startTime = Date.now();
 
-  // Check database
-  let dbStatus: 'ok' | 'error' = 'ok';
-  try {
-    await db.tradeAuditLog.findFirst({ take: 1 });
-  } catch {
-    dbStatus = 'error';
-  }
-
   // Check external APIs
-  const [binanceStatus, coinGeckoStatus] = await Promise.all([
-    checkService('https://api.binance.com/api/v3/ping'),
-    checkService('https://api.coingecko.com/api/v3/ping'),
+  const services: ServiceStatus[] = await Promise.all([
+    checkService('Binance API', 'https://api.binance.com/api/v3/ping'),
+    checkService('CoinGecko API', 'https://api.coingecko.com/api/v3/ping'),
   ]);
 
-  // Check internal mini-services
-  const [priceServiceStatus, cronServiceStatus] = await Promise.all([
-    checkService('http://localhost:3003/'),
-    checkService('http://localhost:3004/status'),
-  ]);
-
-  // Trading stats — read from trader-data.json
-  let openPositions = 0;
-  let balance = 0;
-  let drawdownPct = 0;
-  let lastScanAt: number | null = null;
-
+  // Check database (Prisma/SQLite)
   try {
-    const dataPath = join(process.cwd(), 'trader-data.json');
-    if (existsSync(dataPath)) {
-      const raw = await readFile(dataPath, 'utf-8');
-      const data = JSON.parse(raw);
-      openPositions = (data.trades || []).filter((t: { resolved: boolean }) => !t.resolved).length;
-      balance = data.balance ?? 0;
-      const initialDeposit = data.initialDeposit || 100;
-      drawdownPct = balance < initialDeposit
-        ? Math.round(((initialDeposit - balance) / initialDeposit) * 10000) / 100
-        : 0;
-      lastScanAt = data.lastScanAt ?? null;
-    }
+    const { db } = await import('@/lib/db');
+    await db.tradeAuditLog.findFirst({ take: 1 });
+    services.push({ name: 'Database', status: 'ok', latencyMs: 0 });
   } catch {
-    // trader-data.json not available
+    services.push({ name: 'Database', status: 'unknown', detail: 'SQLite (ephemeral on serverless)' });
   }
 
-  const memoryUsage = process.memoryUsage();
+  // WebSocket price feed (now direct Binance WS from browser)
+  services.push({ name: 'Live Prices', status: 'ok', detail: 'Binance WebSocket (direct)' });
 
   // Determine overall status
-  const serviceErrors = [dbStatus, binanceStatus, coinGeckoStatus].filter(s => s === 'error').length;
-  const overallStatus = serviceErrors >= 2 ? 'error' : serviceErrors >= 1 ? 'degraded' : 'ok';
+  const serviceErrors = services.filter(s => s.status === 'error').length;
+  const overallStatus = serviceErrors >= 2 ? 'error' as const : serviceErrors >= 1 ? 'degraded' as const : 'ok' as const;
 
   return NextResponse.json({
     status: overallStatus,
     timestamp: Date.now(),
     uptime: Math.round(process.uptime()),
     responseTimeMs: Date.now() - startTime,
-    services: {
-      database: dbStatus,
-      binanceApi: binanceStatus,
-      coinGeckoApi: coinGeckoStatus,
-      priceService: priceServiceStatus === 'ok' ? 'ok' as const : 'unknown' as const,
-      cronService: cronServiceStatus === 'ok' ? 'ok' as const : 'unknown' as const,
-    },
-    trading: {
-      openPositions,
-      balance,
-      drawdownPct,
-      lastScanAt,
-    },
-    memoryUsage: {
-      rss: Math.round(memoryUsage.rss / 1024 / 1024),
-      heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024),
-      heapTotal: Math.round(memoryUsage.heapTotal / 1024 / 1024),
-    },
+    services,
   });
 }

@@ -27,3 +27,4 @@ export { PerformanceDashboard } from './PerformanceDashboard';
 export { NewsAnalysisDialog } from './NewsAnalysisDialog';
 export { BacktestDialog } from './BacktestDialog';
 export { HealthStatusIndicator } from './HealthStatusIndicator';
+export { MarketOverviewBar } from './MarketOverviewBar';

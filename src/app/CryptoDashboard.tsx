@@ -25,6 +25,7 @@ import { PerformanceDashboard } from '@/components/trading/PerformanceDashboard'
 import { NewsAnalysisDialog } from '@/components/trading/NewsAnalysisDialog';
 import { BacktestDialog } from '@/components/trading/BacktestDialog';
 import { HealthStatusIndicator } from '@/components/trading/HealthStatusIndicator';
+import { MarketOverviewBar } from '@/components/trading/MarketOverviewBar';
 
 // Hooks
 import { useRealtimePrice } from '@/hooks/useRealtimePrice';
@@ -95,6 +96,7 @@ export default function CryptoDashboard() {
   const [sentiment, setSentiment] = useState<SentimentData | null>(null);
   const [showIndicators, setShowIndicators] = useState(true);
   const [positionTool, setPositionTool] = useState<PositionTool>({ enabled: false, direction: 'LONG', entryPrice: 0, targetPrice: 0, stopLoss: 0, amount: 100, leverage: 1 });
+  const [priceFlash, setPriceFlash] = useState<'up' | 'down' | null>(null);
   const [copied, setCopied] = useState(false);
   const [advisorAnalysis, setAdvisorAnalysis] = useState<string | null>(null);
   const [advisorLoading, setAdvisorLoading] = useState(false);
@@ -122,6 +124,17 @@ export default function CryptoDashboard() {
   const wsSymbol = useMemo(() => `${(selectedCoinData?.symbol || selectedCoin).toUpperCase()}USDT`, [selectedCoinData?.symbol, selectedCoin]);
   const realtime = useRealtimePrice(wsSymbol);
   const realtimePrice = realtime.connected ? parseFloat(realtime.price) || 0 : 0;
+
+  // Price flash effect
+  const prevRealtimePrice = useRef(0);
+  useEffect(() => {
+    if (realtimePrice > 0 && prevRealtimePrice.current > 0 && realtimePrice !== prevRealtimePrice.current) {
+      setPriceFlash(realtimePrice > prevRealtimePrice.current ? 'up' : 'down');
+      const t = setTimeout(() => setPriceFlash(null), 600);
+      return () => clearTimeout(t);
+    }
+    if (realtimePrice > 0) prevRealtimePrice.current = realtimePrice;
+  }, [realtimePrice]);
 
   const priceChange24h = selectedCoinData?.price_change_percentage_24h || 0;
   const displayPrice = realtimePrice > 0 ? realtimePrice : (selectedCoinData?.current_price || chartData[chartData.length - 1]?.close || 0);
@@ -299,11 +312,11 @@ export default function CryptoDashboard() {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-card/80 backdrop-blur-xl border-b border-border">
+      <header className="sticky top-0 z-50 bg-card/90 backdrop-blur-xl border-b border-border shadow-sm">
         <div className="max-w-[1700px] mx-auto px-4 py-2.5 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center"><BarChart3 className="w-5 h-5 text-white" /></div>
-            <div><h1 className="text-lg font-bold tracking-tight">IntraTrade Pro</h1><p className="text-[10px] text-muted-foreground">Внутридневной торговый терминал</p></div>
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shadow-emerald-500/20"><BarChart3 className="w-5 h-5 text-white" /></div>
+            <div><h1 className="text-lg font-black tracking-tight bg-gradient-to-r from-emerald-500 to-teal-500 bg-clip-text text-transparent">IntraTrade Pro</h1><p className="text-[10px] text-muted-foreground">Professional Trading Terminal</p></div>
           </div>
           <div className="flex items-center gap-2">
             <HealthStatusIndicator />
@@ -352,6 +365,9 @@ export default function CryptoDashboard() {
         </div>
       </header>
 
+      {/* Market Overview Bar */}
+      <MarketOverviewBar coins={coins} sentiment={sentiment} tradeSignal={ts} selectedCoinData={selectedCoinData} />
+
       <main className="max-w-[1700px] mx-auto px-4 py-3">
         <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-3">
           {/* Left: Coin List */}
@@ -366,7 +382,11 @@ export default function CryptoDashboard() {
             <div className="grid grid-cols-1 md:grid-cols-[1fr_280px] gap-3">
               <Card><CardContent className="p-3"><div className="flex flex-wrap items-center gap-3">
                 <div className="flex items-center gap-2"><div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center overflow-hidden">{selectedCoinData?.image ? <img src={selectedCoinData.image} alt="" className="w-7 h-7" /> : <span className="text-sm font-bold">{(selectedCoinData?.symbol || '??').slice(0, 2)}</span>}</div><div><h2 className="text-base font-bold">{selectedCoinData?.name || selectedCoin}</h2><span className="text-[10px] text-muted-foreground uppercase">{selectedCoinData?.symbol || selectedCoin}/USDT</span></div></div>
-                <div className="flex items-baseline gap-2"><span className="text-xl font-bold font-mono">${formatPrice(displayPrice)}</span><span className={`text-xs font-semibold flex items-center gap-0.5 ${displayChange24h >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{displayChange24h >= 0 ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}{Math.abs(displayChange24h).toFixed(2)}%</span>{realtime.connected && <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="Live" />}</div>
+                <div className="flex items-baseline gap-2">
+                  <span className={`text-2xl font-black font-mono transition-colors duration-300 ${priceFlash === 'up' ? 'text-emerald-400' : priceFlash === 'down' ? 'text-red-400' : ''}`}>${formatPrice(displayPrice)}</span>
+                  <span className={`text-xs font-bold flex items-center gap-0.5 ${displayChange24h >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{displayChange24h >= 0 ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}{Math.abs(displayChange24h).toFixed(2)}%</span>
+                  {realtime.connected && <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /><span className="text-[9px] font-bold text-emerald-500">LIVE</span></span>}
+                </div>
                 <div className="flex gap-3 ml-auto text-[10px]">{selectedCoinData?.market_cap ? <div className="text-center"><div className="text-muted-foreground">Кап.</div><div className="font-mono font-semibold">{formatNumber(selectedCoinData.market_cap)}</div></div> : null}{ts && ts.atr > 0 && <div className="text-center"><div className="text-muted-foreground">ATR</div><div className="font-mono text-blue-500">${formatPrice(ts.atr)}</div></div>}{ts && <div className="text-center"><div className="text-muted-foreground">Подд</div><div className="font-mono text-emerald-500">${formatPrice(ts.support)}</div></div>}{ts && <div className="text-center"><div className="text-muted-foreground">Сопр</div><div className="font-mono text-red-500">${formatPrice(ts.resistance)}</div></div>}</div>
               </div></CardContent></Card>
 
@@ -482,6 +502,20 @@ export default function CryptoDashboard() {
       {selectedTrade && (
         <TradeTerminalModal trade={selectedTrade} coins={coins} onClose={() => setSelectedTrade(null)} />
       )}
+
+      {/* Footer */}
+      <footer className="mt-4 border-t border-border bg-card/50 backdrop-blur-sm">
+        <div className="max-w-[1700px] mx-auto px-4 py-2 flex items-center justify-between text-[10px] text-muted-foreground">
+          <span>IntraTrade Pro v2.0 — Professional Trading Terminal</span>
+          <div className="flex items-center gap-3">
+            <span>Direct Binance WebSocket</span>
+            <span>•</span>
+            <span>TradingView Charts</span>
+            <span>•</span>
+            <span>AI-Powered Signals</span>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
