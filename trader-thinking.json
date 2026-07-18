@@ -1,6 +1,36 @@
 {
   "thoughts": [
     {
+      "id": "thought_1784403555943_ss84",
+      "timestamp": 1784403555943,
+      "type": "decision",
+      "title": "ОТКРЫТА: LINK LONG",
+      "detail": "ЛИМИТ conf:69% R:R:2.50",
+      "coinSymbol": "LINK",
+      "coinId": "chainlink",
+      "direction": "LONG",
+      "confidence": 69,
+      "score": 74.34899999999999,
+      "tradeId": "trade_1784403555633_pmg918",
+      "entryType": "LIMIT",
+      "emotion": "analytical",
+      "tags": [
+        "open_position"
+      ]
+    },
+    {
+      "id": "thought_1784403555326_ffer",
+      "timestamp": 1784403555326,
+      "type": "scan",
+      "title": "Скан: 25 сигналов (19 LONG, 6 SHORT)",
+      "detail": "Рынок: Бычий. Свободных: $100.00. Открытых: 0/5.",
+      "emotion": "analytical",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
       "id": "thought_1784400357080_r478",
       "timestamp": 1784400357080,
       "type": "scan",
@@ -2344,8 +2374,8 @@
   "currentMood": "Анализ рынка",
   "activeStrategy": "Внутридневная торговля с адаптивным входом",
   "marketView": "Бычий",
-  "lastScanAt": 1784400357080,
+  "lastScanAt": 1784403555326,
   "openPositionsCount": 1,
-  "freeBalance": 76,
+  "freeBalance": 88,
   "totalEquity": 100
 }

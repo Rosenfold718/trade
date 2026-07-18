@@ -1,10 +1,10 @@
 {
   "initialDeposit": 100,
   "balance": 76,
-  "totalTrades": 1,
+  "totalTrades": 2,
   "wins": 0,
   "losses": 0,
-  "expired": 0,
+  "expired": 1,
   "score": 0,
   "winRate": 0,
   "avgPnl": 0,
@@ -47,6 +47,49 @@
       "timestamp": 1784396143783,
       "entryReached": false,
       "enteredAt": null,
+      "resolved": true,
+      "result": "EXPIRED",
+      "exitPrice": 570.8,
+      "exitReason": "Лимитный ордер не сработал за 2ч — капитал освобождён",
+      "closedAt": 1784403553217,
+      "pnlUSDT": 0,
+      "pnlPct": 0,
+      "pointsChange": -3,
+      "trailingStop": false,
+      "trailingStepPct": 0.01,
+      "highestPrice": 569.2787994138058,
+      "lowestPrice": 569.2787994138058
+    },
+    {
+      "id": "trade_1784403555633_pmg918",
+      "coinId": "chainlink",
+      "coinSymbol": "LINK",
+      "direction": "LONG",
+      "entryType": "LIMIT",
+      "entry": 8.27992264050222,
+      "currentPrice": 8.328,
+      "stopLoss": 8.197123414097197,
+      "takeProfit1": 8.404121480109753,
+      "takeProfit2": 8.46622089991352,
+      "takeProfit3": 8.528320319717286,
+      "confidence": 69,
+      "timeframe": "1h",
+      "entryReason": "Откат к EMA21 — динамическая поддержка",
+      "reasons": [
+        "Откат к EMA21 — динамическая поддержка",
+        "Восходящий тренд подтверждён EMA",
+        "MACD гистограмма растёт",
+        "MACD выше сигнальной",
+        "Свечной паттерн: Три белых солдата",
+        "Цена выше VWAP — бычий настрой",
+        "OBV растёт — накопление"
+      ],
+      "leverage": 3,
+      "positionSize": 24,
+      "quantity": 2.898577805860307,
+      "timestamp": 1784403555633,
+      "entryReached": false,
+      "enteredAt": null,
       "resolved": false,
       "result": null,
       "exitPrice": null,
@@ -57,8 +100,8 @@
       "pointsChange": null,
       "trailingStop": false,
       "trailingStepPct": 0.01,
-      "highestPrice": 569.2787994138058,
-      "lowestPrice": 569.2787994138058
+      "highestPrice": 8.27992264050222,
+      "lowestPrice": 8.27992264050222
     }
   ],
   "depositHistory": [
@@ -116,9 +159,14 @@
       "timestamp": 1784400354434,
       "balance": 76,
       "equity": 100
+    },
+    {
+      "timestamp": 1784403553217,
+      "balance": 100,
+      "equity": 100
     }
   ],
-  "lastUpdated": 1784400358553,
+  "lastUpdated": 1784403714141,
   "totalDebt": 0,
   "debtHistory": [],
   "totalRepaid": 0,
@@ -142,7 +190,18 @@
       "breakout",
       "high_confidence"
     ],
-    "lessons": [],
-    "lessonsVersion": 0
+    "lessons": [
+      {
+        "type": "limit_expired",
+        "description": "LIMIT ордер на BNB не сработал за 2ч — при сильном сигнале лучше входить по рынку",
+        "coinId": "binancecoin",
+        "direction": "LONG",
+        "value": 73,
+        "timestamp": 1784403553217,
+        "tradeId": "trade_1784396143782_ijsgu4",
+        "severity": "low"
+      }
+    ],
+    "lessonsVersion": 1
   }
 }
