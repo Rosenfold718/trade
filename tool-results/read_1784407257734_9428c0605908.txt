@@ -1,0 +1,647 @@
+     1→'use client';
+     2→
+     3→import React, { useState, useEffect, useCallback } from 'react';
+     4→import {
+     5→  X,
+     6→  TrendingUp,
+     7→  TrendingDown,
+     8→  Target,
+     9→  BarChart3,
+    10→  AlertTriangle,
+    11→  Activity,
+    12→  Clock,
+    13→  ArrowUpRight,
+    14→  ArrowDownRight,
+    15→  Minus,
+    16→} from 'lucide-react';
+    17→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+    18→import { Badge } from '@/components/ui/badge';
+    19→import { Button } from '@/components/ui/button';
+    20→import { Skeleton } from '@/components/ui/skeleton';
+    21→import {
+    22→  Table,
+    23→  TableBody,
+    24→  TableCell,
+    25→  TableHead,
+    26→  TableHeader,
+    27→  TableRow,
+    28→} from '@/components/ui/table';
+    29→import { EquityChart } from '@/components/trading/EquityChart';
+    30→import {
+    31→  BarChart,
+    32→  Bar,
+    33→  XAxis,
+    34→  YAxis,
+    35→  Tooltip,
+    36→  ResponsiveContainer,
+    37→  Cell,
+    38→  CartesianGrid,
+    39→} from 'recharts';
+    40→
+    41→// ─── Types ───
+    42→
+    43→interface PerformanceDashboardProps {
+    44→  visible: boolean;
+    45→  onClose: () => void;
+    46→}
+    47→
+    48→interface MonthlyBreakdown {
+    49→  month: string;
+    50→  label: string;
+    51→  trades: number;
+    52→  wins: number;
+    53→  losses: number;
+    54→  expired: number;
+    55→  pnl: number;
+    56→  winRate: number;
+    57→}
+    58→
+    59→interface DirectionStats {
+    60→  direction: string;
+    61→  total: number;
+    62→  wins: number;
+    63→  losses: number;
+    64→  winRate: number;
+    65→  totalPnl: number;
+    66→  avgPnl: number;
+    67→}
+    68→
+    69→interface CoinStats {
+    70→  coinId: string;
+    71→  coinSymbol: string;
+    72→  total: number;
+    73→  wins: number;
+    74→  losses: number;
+    75→  winRate: number;
+    76→  totalPnl: number;
+    77→}
+    78→
+    79→interface RecentTrend {
+    80→  tradeId: string;
+    81→  coinSymbol: string;
+    82→  direction: string;
+    83→  pnl: number;
+    84→  timestamp: number;
+    85→}
+    86→
+    87→interface PerformanceData {
+    88→  totalPnl: number;
+    89→  totalPnlPct: number;
+    90→  winRate: number;
+    91→  profitFactor: number;
+    92→  sharpeRatio: number;
+    93→  maxDrawdown: number;
+    94→  totalTrades: number;
+    95→  avgWin: number;
+    96→  avgLoss: number;
+    97→  expectancy: number;
+    98→  calmarRatio: number;
+    99→  sortinoRatio: number;
+   100→  consecutiveWins: number;
+   101→  consecutiveLosses: number;
+   102→  bestTrade: number;
+   103→  worstTrade: number;
+   104→  initialDeposit: number;
+   105→  equityCurve: { timestamp: number; equity: number; balance: number }[];
+   106→  monthlyBreakdown: MonthlyBreakdown[];
+   107→  directionBreakdown: DirectionStats[];
+   108→  coinBreakdown: CoinStats[];
+   109→  avgHoldHours: number;
+   110→  avgPnlPerTrade: number;
+   111→  recentTrend: RecentTrend[];
+   112→}
+   113→
+   114→// ─── Helpers ───
+   115→
+   116→function formatPnl(v: number): string {
+   117→  const sign = v >= 0 ? '+' : '';
+   118→  return `${sign}${v.toFixed(2)}`;
+   119→}
+   120→
+   121→function pnlColor(v: number): string {
+   122→  if (v > 0) return 'text-emerald-500';
+   123→  if (v < 0) return 'text-red-500';
+   124→  return 'text-muted-foreground';
+   125→}
+   126→
+   127→function pnlBgColor(v: number): string {
+   128→  if (v > 0) return 'border-emerald-500/30 bg-emerald-500/5';
+   129→  if (v < 0) return 'border-red-500/30 bg-red-500/5';
+   130→  return 'border-border bg-card';
+   131→}
+   132→
+   133→function pnlBarColor(v: number): string {
+   134→  if (v > 0) return '#10b981';
+   135→  if (v < 0) return '#ef4444';
+   136→  return '#6b7280';
+   137→}
+   138→
+   139→// ─── Metric Card ───
+   140→
+   141→function MetricCard({
+   142→  label,
+   143→  value,
+   144→  subValue,
+   145→  icon: Icon,
+   146→  color = 'text-foreground',
+   147→  bgColor = 'bg-card',
+   148→  borderColor = 'border-border',
+   149→}: {
+   150→  label: string;
+   151→  value: string;
+   152→  subValue?: string;
+   153→  icon: React.ElementType;
+   154→  color?: string;
+   155→  bgColor?: string;
+   156→  borderColor?: string;
+   157→}) {
+   158→  return (
+   159→    <div className={`rounded-xl border ${borderColor} ${bgColor} p-3 flex flex-col gap-1`}>
+   160→      <div className="flex items-center gap-1.5">
+   161→        <Icon className={`w-3.5 h-3.5 ${color}`} />
+   162→        <span className="text-[10px] text-muted-foreground uppercase font-medium">{label}</span>
+   163→      </div>
+   164→      <div className={`text-sm font-mono font-bold ${color}`}>{value}</div>
+   165→      {subValue && (
+   166→        <div className="text-[10px] font-mono text-muted-foreground">{subValue}</div>
+   167→      )}
+   168→    </div>
+   169→  );
+   170→}
+   171→
+   172→// ─── Custom Tooltip for BarChart ───
+   173→
+   174→function MonthlyTooltip({ active, payload, label }: any) {
+   175→  if (!active || !payload || payload.length === 0) return null;
+   176→  const data = payload[0].payload as MonthlyBreakdown;
+   177→  return (
+   178→    <div className="bg-popover border border-border rounded-lg p-2 shadow-xl text-[10px]">
+   179→      <div className="font-bold text-foreground mb-1">{data.label}</div>
+   180→      <div className="text-muted-foreground">Сделок: {data.trades}</div>
+   181→      <div className="text-emerald-500">Побед: {data.wins}</div>
+   182→      <div className="text-red-500">Поражений: {data.losses}</div>
+   183→      <div className={`font-mono font-bold ${data.pnl >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+   184→        PnL: {formatPnl(data.pnl)} USDT
+   185→      </div>
+   186→    </div>
+   187→  );
+   188→}
+   189→
+   190→// ─── Main Component ───
+   191→
+   192→export function PerformanceDashboard({ visible, onClose }: PerformanceDashboardProps) {
+   193→  const [data, setData] = useState<PerformanceData | null>(null);
+   194→  const [loading, setLoading] = useState(false);
+   195→  const [error, setError] = useState<string | null>(null);
+   196→
+   197→  const fetchData = useCallback(async () => {
+   198→    setLoading(true);
+   199→    setError(null);
+   200→    try {
+   201→      const res = await fetch('/api/crypto/performance');
+   202→      if (!res.ok) throw new Error('Ошибка загрузки');
+   203→      const json = await res.json();
+   204→      setData(json);
+   205→    } catch (e) {
+   206→      setError(e instanceof Error ? e.message : 'Ошибка');
+   207→    } finally {
+   208→      setLoading(false);
+   209→    }
+   210→  }, []);
+   211→
+   212→  useEffect(() => {
+   213→    if (visible) fetchData();
+   214→  }, [visible, fetchData]);
+   215→
+   216→  if (!visible) return null;
+   217→
+   218→  const pnl = data?.totalPnl ?? 0;
+   219→  const pnlPct = data?.totalPnlPct ?? 0;
+   220→  const isProfit = pnl >= 0;
+   221→
+   222→  return (
+   223→    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4" onClick={onClose}>
+   224→      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+   225→      <div
+   226→        className="relative bg-card border border-border rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] overflow-hidden flex flex-col"
+   227→        onClick={e => e.stopPropagation()}
+   228→      >
+   229→        {/* ── Header ── */}
+   230→        <div className="flex-shrink-0 px-5 py-3 border-b border-border bg-gradient-to-r from-emerald-500/10 via-transparent to-transparent">
+   231→          <div className="flex items-center justify-between">
+   232→            <div className="flex items-center gap-2">
+   233→              <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+   234→                <BarChart3 className="w-4 h-4 text-emerald-500" />
+   235→              </div>
+   236→              <div>
+   237→                <h2 className="text-sm font-bold">Аналитика P&L</h2>
+   238→                <div className="text-[10px] text-muted-foreground">
+   239→                  Комплексная статистика производительности
+   240→                </div>
+   241→              </div>
+   242→            </div>
+   243→            <div className="flex items-center gap-2">
+   244→              <Button
+   245→                variant="ghost"
+   246→                size="sm"
+   247→                className="h-7 text-[10px] gap-1"
+   248→                onClick={fetchData}
+   249→                disabled={loading}
+   250→              >
+   251→                {loading ? 'Загрузка...' : 'Обновить'}
+   252→              </Button>
+   253→              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose}>
+   254→                <X className="w-4 h-4" />
+   255→              </Button>
+   256→            </div>
+   257→          </div>
+   258→        </div>
+   259→
+   260→        {/* ── Content ── */}
+   261→        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+   262→          {loading && !data && (
+   263→            <div className="space-y-4">
+   264→              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+   265→                {Array.from({ length: 6 }).map((_, i) => (
+   266→                  <Skeleton key={i} className="h-20 rounded-xl" />
+   267→                ))}
+   268→              </div>
+   269→              <Skeleton className="h-40 rounded-xl" />
+   270→              <Skeleton className="h-60 rounded-xl" />
+   271→            </div>
+   272→          )}
+   273→
+   274→          {error && !data && (
+   275→            <div className="text-center py-10 text-muted-foreground text-sm">
+   276→              {error}
+   277→            </div>
+   278→          )}
+   279→
+   280→          {data && (
+   281→            <>
+   282→              {/* ═══ Section 1: Key Metrics Grid ═══ */}
+   283→              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+   284→                {/* Total P&L */}
+   285→                <MetricCard
+   286→                  label="Всего P&L"
+   287→                  value={`${formatPnl(pnl)} $`}
+   288→                  subValue={`${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%`}
+   289→                  icon={pnl >= 0 ? TrendingUp : TrendingDown}
+   290→                  color={pnlColor(pnl)}
+   291→                  bgColor={pnl >= 0 ? 'bg-emerald-500/5' : 'bg-red-500/5'}
+   292→                  borderColor={pnl >= 0 ? 'border-emerald-500/30' : 'border-red-500/30'}
+   293→                />
+   294→
+   295→                {/* Win Rate */}
+   296→                <MetricCard
+   297→                  label="Винрейт"
+   298→                  value={`${data.winRate.toFixed(1)}%`}
+   299→                  subValue={`${Math.round(data.totalTrades * data.winRate / 100)}W / ${data.totalTrades - Math.round(data.totalTrades * data.winRate / 100)}L`}
+   300→                  icon={Target}
+   301→                  color={data.winRate >= 50 ? 'text-emerald-500' : 'text-red-500'}
+   302→                  bgColor={data.winRate >= 50 ? 'bg-emerald-500/5' : 'bg-red-500/5'}
+   303→                  borderColor={data.winRate >= 50 ? 'border-emerald-500/30' : 'border-red-500/30'}
+   304→                />
+   305→
+   306→                {/* Profit Factor */}
+   307→                <MetricCard
+   308→                  label="Профит-фактор"
+   309→                  value={data.profitFactor === Infinity ? '∞' : data.profitFactor.toFixed(2)}
+   310→                  subValue={data.profitFactor >= 1.5 ? 'Отлично' : data.profitFactor >= 1 ? 'Норма' : 'Плохо'}
+   311→                  icon={BarChart3}
+   312→                  color={data.profitFactor >= 1.5 ? 'text-emerald-500' : data.profitFactor >= 1 ? 'text-amber-500' : 'text-red-500'}
+   313→                  bgColor={data.profitFactor >= 1.5 ? 'bg-emerald-500/5' : data.profitFactor >= 1 ? 'bg-amber-500/5' : 'bg-red-500/5'}
+   314→                  borderColor={data.profitFactor >= 1.5 ? 'border-emerald-500/30' : data.profitFactor >= 1 ? 'border-amber-500/30' : 'border-red-500/30'}
+   315→                />
+   316→
+   317→                {/* Sharpe Ratio */}
+   318→                <MetricCard
+   319→                  label="Шарп"
+   320→                  value={data.sharpeRatio.toFixed(2)}
+   321→                  subValue={data.sharpeRatio >= 1 ? 'Хорошо' : data.sharpeRatio >= 0.5 ? 'Средне' : 'Низко'}
+   322→                  icon={Activity}
+   323→                  color={data.sharpeRatio >= 1 ? 'text-emerald-500' : data.sharpeRatio >= 0.5 ? 'text-amber-500' : 'text-red-500'}
+   324→                  bgColor={data.sharpeRatio >= 1 ? 'bg-emerald-500/5' : data.sharpeRatio >= 0.5 ? 'bg-amber-500/5' : 'bg-red-500/5'}
+   325→                  borderColor={data.sharpeRatio >= 1 ? 'border-emerald-500/30' : data.sharpeRatio >= 0.5 ? 'border-amber-500/30' : 'border-red-500/30'}
+   326→                />
+   327→
+   328→                {/* Max Drawdown */}
+   329→                <MetricCard
+   330→                  label="Макс. просадка"
+   331→                  value={`${data.maxDrawdown.toFixed(1)}%`}
+   332→                  subValue={data.maxDrawdown < 10 ? 'Контроль' : data.maxDrawdown < 25 ? 'Внимание' : 'Опасно'}
+   333→                  icon={AlertTriangle}
+   334→                  color={data.maxDrawdown < 10 ? 'text-emerald-500' : data.maxDrawdown < 25 ? 'text-amber-500' : 'text-red-500'}
+   335→                  bgColor={data.maxDrawdown < 10 ? 'bg-emerald-500/5' : data.maxDrawdown < 25 ? 'bg-amber-500/5' : 'bg-red-500/5'}
+   336→                  borderColor={data.maxDrawdown < 10 ? 'border-emerald-500/30' : data.maxDrawdown < 25 ? 'border-amber-500/30' : 'border-red-500/30'}
+   337→                />
+   338→
+   339→                {/* Total Trades */}
+   340→                <MetricCard
+   341→                  label="Всего сделок"
+   342→                  value={`${data.totalTrades}`}
+   343→                  subValue={`Серия W: ${data.consecutiveWins} / L: ${data.consecutiveLosses}`}
+   344→                  icon={Activity}
+   345→                  color="text-foreground"
+   346→                />
+   347→              </div>
+   348→
+   349→              {/* ═══ Section 2: Equity Curve ═══ */}
+   350→              {data.equityCurve.length >= 2 && (
+   351→                <Card className="border-border">
+   352→                  <CardHeader className="pb-2 pt-3 px-4">
+   353→                    <CardTitle className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+   354→                      Кривая капитала
+   355→                    </CardTitle>
+   356→                  </CardHeader>
+   357→                  <CardContent className="px-4 pb-3">
+   358→                    <EquityChart
+   359→                      data={data.equityCurve}
+   360→                      initialDeposit={data.initialDeposit}
+   361→                      height={160}
+   362→                    />
+   363→                  </CardContent>
+   364→                </Card>
+   365→              )}
+   366→
+   367→              {/* ═══ Section 3: Monthly Breakdown ═══ */}
+   368→              {data.monthlyBreakdown.length > 0 && (
+   369→                <Card className="border-border">
+   370→                  <CardHeader className="pb-2 pt-3 px-4">
+   371→                    <CardTitle className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+   372→                      Помесячная статистика
+   373→                    </CardTitle>
+   374→                  </CardHeader>
+   375→                  <CardContent className="px-4 pb-3 space-y-3">
+   376→                    {/* Bar Chart */}
+   377→                    <div className="h-36">
+   378→                      <ResponsiveContainer width="100%" height="100%">
+   379→                        <BarChart data={data.monthlyBreakdown} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+   380→                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+   381→                          <XAxis
+   382→                            dataKey="label"
+   383→                            tick={{ fill: '#9ca3af', fontSize: 10, fontFamily: 'ui-monospace, monospace' }}
+   384→                            axisLine={{ stroke: 'rgba(255,255,255,0.1)' }}
+   385→                            tickLine={false}
+   386→                          />
+   387→                          <YAxis
+   388→                            tick={{ fill: '#9ca3af', fontSize: 10, fontFamily: 'ui-monospace, monospace' }}
+   389→                            axisLine={false}
+   390→                            tickLine={false}
+   391→                            tickFormatter={(v) => `${v >= 0 ? '+' : ''}${v}`}
+   392→                          />
+   393→                          <Tooltip content={<MonthlyTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+   394→                          <Bar dataKey="pnl" radius={[3, 3, 0, 0]} maxBarSize={40}>
+   395→                            {data.monthlyBreakdown.map((entry, index) => (
+   396→                              <Cell key={index} fill={pnlBarColor(entry.pnl)} />
+   397→                            ))}
+   398→                          </Bar>
+   399→                        </BarChart>
+   400→                      </ResponsiveContainer>
+   401→                    </div>
+   402→
+   403→                    {/* Table */}
+   404→                    <Table>
+   405→                      <TableHeader>
+   406→                        <TableRow className="hover:bg-transparent">
+   407→                          <TableHead className="text-[10px]">Месяц</TableHead>
+   408→                          <TableHead className="text-[10px] text-center">Сделки</TableHead>
+   409→                          <TableHead className="text-[10px] text-center text-emerald-500">Побед</TableHead>
+   410→                          <TableHead className="text-[10px] text-center text-red-500">Пораж.</TableHead>
+   411→                          <TableHead className="text-[10px] text-right">P&L</TableHead>
+   412→                          <TableHead className="text-[10px] text-right">Винрейт</TableHead>
+   413→                        </TableRow>
+   414→                      </TableHeader>
+   415→                      <TableBody>
+   416→                        {data.monthlyBreakdown.map((m) => (
+   417→                          <TableRow key={m.month}>
+   418→                            <TableCell className="text-[11px] font-medium">{m.label}</TableCell>
+   419→                            <TableCell className="text-[11px] font-mono text-center">{m.trades}</TableCell>
+   420→                            <TableCell className="text-[11px] font-mono text-center text-emerald-500">{m.wins}</TableCell>
+   421→                            <TableCell className="text-[11px] font-mono text-center text-red-500">{m.losses}</TableCell>
+   422→                            <TableCell className={`text-[11px] font-mono font-bold text-right ${pnlColor(m.pnl)}`}>
+   423→                              {formatPnl(m.pnl)} $
+   424→                            </TableCell>
+   425→                            <TableCell className={`text-[11px] font-mono text-right ${m.winRate >= 50 ? 'text-emerald-500' : 'text-red-500'}`}>
+   426→                              {m.winRate}%
+   427→                            </TableCell>
+   428→                          </TableRow>
+   429→                        ))}
+   430→                      </TableBody>
+   431→                    </Table>
+   432→                  </CardContent>
+   433→                </Card>
+   434→              )}
+   435→
+   436→              {/* ═══ Section 4: Performance by Metric ═══ */}
+   437→              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+   438→                {/* Direction breakdown */}
+   439→                <Card className="border-border">
+   440→                  <CardHeader className="pb-2 pt-3 px-4">
+   441→                    <CardTitle className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+   442→                      По направлению
+   443→                    </CardTitle>
+   444→                  </CardHeader>
+   445→                  <CardContent className="px-4 pb-3">
+   446→                    {data.directionBreakdown.length === 0 ? (
+   447→                      <div className="text-[11px] text-muted-foreground text-center py-4">Нет данных</div>
+   448→                    ) : (
+   449→                      <Table>
+   450→                        <TableHeader>
+   451→                          <TableRow className="hover:bg-transparent">
+   452→                            <TableHead className="text-[10px]">Направление</TableHead>
+   453→                            <TableHead className="text-[10px] text-center">Всего</TableHead>
+   454→                            <TableHead className="text-[10px] text-right">Винрейт</TableHead>
+   455→                            <TableHead className="text-[10px] text-right">P&L</TableHead>
+   456→                          </TableRow>
+   457→                        </TableHeader>
+   458→                        <TableBody>
+   459→                          {data.directionBreakdown.map((d) => (
+   460→                            <TableRow key={d.direction}>
+   461→                              <TableCell>
+   462→                                <Badge
+   463→                                  variant="outline"
+   464→                                  className={`text-[10px] ${
+   465→                                    d.direction === 'LONG'
+   466→                                      ? 'border-emerald-500/30 text-emerald-500'
+   467→                                      : 'border-red-500/30 text-red-500'
+   468→                                  }`}
+   469→                                >
+   470→                                  {d.direction === 'LONG' ? (
+   471→                                    <ArrowUpRight className="w-3 h-3 mr-1" />
+   472→                                  ) : (
+   473→                                    <ArrowDownRight className="w-3 h-3 mr-1" />
+   474→                                  )}
+   475→                                  {d.direction}
+   476→                                </Badge>
+   477→                              </TableCell>
+   478→                              <TableCell className="text-[11px] font-mono text-center">{d.total}</TableCell>
+   479→                              <TableCell
+   480→                                className={`text-[11px] font-mono font-bold text-right ${
+   481→                                  d.winRate >= 50 ? 'text-emerald-500' : 'text-red-500'
+   482→                                }`}
+   483→                              >
+   484→                                {d.winRate}%
+   485→                              </TableCell>
+   486→                              <TableCell className={`text-[11px] font-mono font-bold text-right ${pnlColor(d.totalPnl)}`}>
+   487→                                {formatPnl(d.totalPnl)} $
+   488→                              </TableCell>
+   489→                            </TableRow>
+   490→                          ))}
+   491→                        </TableBody>
+   492→                      </Table>
+   493→                    )}
+   494→                  </CardContent>
+   495→                </Card>
+   496→
+   497→                {/* Coin breakdown */}
+   498→                <Card className="border-border">
+   499→                  <CardHeader className="pb-2 pt-3 px-4">
+   500→                    <CardTitle className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+   501→                      Топ монет по сделкам
+   502→                    </CardTitle>
+   503→                  </CardHeader>
+   504→                  <CardContent className="px-4 pb-3">
+   505→                    {data.coinBreakdown.length === 0 ? (
+   506→                      <div className="text-[11px] text-muted-foreground text-center py-4">Нет данных</div>
+   507→                    ) : (
+   508→                      <Table>
+   509→                        <TableHeader>
+   510→                          <TableRow className="hover:bg-transparent">
+   511→                            <TableHead className="text-[10px]">Монета</TableHead>
+   512→                            <TableHead className="text-[10px] text-center">Сделки</TableHead>
+   513→                            <TableHead className="text-[10px] text-right">Винрейт</TableHead>
+   514→                            <TableHead className="text-[10px] text-right">P&L</TableHead>
+   515→                          </TableRow>
+   516→                        </TableHeader>
+   517→                        <TableBody>
+   518→                          {data.coinBreakdown.map((c) => (
+   519→                            <TableRow key={c.coinId}>
+   520→                              <TableCell className="text-[11px] font-bold uppercase">{c.coinSymbol}</TableCell>
+   521→                              <TableCell className="text-[11px] font-mono text-center">{c.total}</TableCell>
+   522→                              <TableCell
+   523→                                className={`text-[11px] font-mono font-bold text-right ${
+   524→                                  c.winRate >= 50 ? 'text-emerald-500' : 'text-red-500'
+   525→                                }`}
+   526→                              >
+   527→                                {c.winRate}%
+   528→                              </TableCell>
+   529→                              <TableCell className={`text-[11px] font-mono font-bold text-right ${pnlColor(c.totalPnl)}`}>
+   530→                                {formatPnl(c.totalPnl)} $
+   531→                              </TableCell>
+   532→                            </TableRow>
+   533→                          ))}
+   534→                        </TableBody>
+   535→                      </Table>
+   536→                    )}
+   537→                  </CardContent>
+   538→                </Card>
+   539→
+   540→                {/* Average hold time + avg P&L */}
+   541→                <Card className="border-border">
+   542→                  <CardHeader className="pb-2 pt-3 px-4">
+   543→                    <CardTitle className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+   544→                      Средние показатели
+   545→                    </CardTitle>
+   546→                  </CardHeader>
+   547→                  <CardContent className="px-4 pb-3">
+   548→                    <div className="grid grid-cols-2 gap-3">
+   549→                      <div className="rounded-lg border border-border bg-card p-3 text-center">
+   550→                        <div className="flex items-center justify-center gap-1.5 mb-1">
+   551→                          <Clock className="w-3.5 h-3.5 text-muted-foreground" />
+   552→                          <span className="text-[10px] text-muted-foreground uppercase">Ср. удержание</span>
+   553→                        </div>
+   554→                        <div className="text-lg font-mono font-bold text-foreground">
+   555→                          {data.avgHoldHours.toFixed(1)}
+   556→                        </div>
+   557→                        <div className="text-[10px] text-muted-foreground">часов</div>
+   558→                      </div>
+   559→                      <div className={`rounded-lg border p-3 text-center ${pnlBgColor(data.avgPnlPerTrade)}`}>
+   560→                        <div className="flex items-center justify-center gap-1.5 mb-1">
+   561→                          <Minus className="w-3.5 h-3.5 text-muted-foreground" />
+   562→                          <span className="text-[10px] text-muted-foreground uppercase">Ср. P&L / сделку</span>
+   563→                        </div>
+   564→                        <div className={`text-lg font-mono font-bold ${pnlColor(data.avgPnlPerTrade)}`}>
+   565→                          {formatPnl(data.avgPnlPerTrade)}
+   566→                        </div>
+   567→                        <div className="text-[10px] text-muted-foreground">USDT</div>
+   568→                      </div>
+   569→                    </div>
+   570→                    {data.avgWin > 0 && data.avgLoss < 0 && (
+   571→                      <div className="grid grid-cols-2 gap-3 mt-3">
+   572→                        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-center">
+   573→                          <div className="text-[10px] text-emerald-500 uppercase mb-1">Ср. прибыль</div>
+   574→                          <div className="text-sm font-mono font-bold text-emerald-500">
+   575→                            +{data.avgWin.toFixed(2)} $
+   576→                          </div>
+   577→                        </div>
+   578→                        <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-3 text-center">
+   579→                          <div className="text-[10px] text-red-500 uppercase mb-1">Ср. убыток</div>
+   580→                          <div className="text-sm font-mono font-bold text-red-500">
+   581→                            {data.avgLoss.toFixed(2)} $
+   582→                          </div>
+   583→                        </div>
+   584→                      </div>
+   585→                    )}
+   586→                  </CardContent>
+   587→                </Card>
+   588→
+   589→                {/* Recent trend */}
+   590→                <Card className="border-border">
+   591→                  <CardHeader className="pb-2 pt-3 px-4">
+   592→                    <CardTitle className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+   593→                      Последние сделки (тренд)
+   594→                    </CardTitle>
+   595→                  </CardHeader>
+   596→                  <CardContent className="px-4 pb-3">
+   597→                    {data.recentTrend.length === 0 ? (
+   598→                      <div className="text-[11px] text-muted-foreground text-center py-4">Нет данных</div>
+   599→                    ) : (
+   600→                      <div className="space-y-1.5 max-h-52 overflow-y-auto">
+   601→                        {data.recentTrend.map((t) => (
+   602→                          <div
+   603→                            key={t.tradeId}
+   604→                            className={`flex items-center justify-between rounded-lg border p-2 text-[10px] ${pnlBgColor(t.pnl)}`}
+   605→                          >
+   606→                            <div className="flex items-center gap-2">
+   607→                              {t.direction === 'LONG' ? (
+   608→                                <ArrowUpRight className="w-3 h-3 text-emerald-500" />
+   609→                              ) : (
+   610→                                <ArrowDownRight className="w-3 h-3 text-red-500" />
+   611→                              )}
+   612→                              <span className="font-bold uppercase">{t.coinSymbol}</span>
+   613→                              <Badge
+   614→                                variant="outline"
+   615→                                className={`text-[8px] px-1 py-0 ${
+   616→                                  t.direction === 'LONG'
+   617→                                    ? 'border-emerald-500/30 text-emerald-500'
+   618→                                    : 'border-red-500/30 text-red-500'
+   619→                                }`}
+   620→                              >
+   621→                                {t.direction}
+   622→                              </Badge>
+   623→                            </div>
+   624→                            <div className="flex items-center gap-3">
+   625→                              <span className="text-muted-foreground text-[9px]">
+   626→                                {new Date(t.timestamp).toLocaleString('ru-RU', {
+   627→                                  day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+   628→                                })}
+   629→                              </span>
+   630→                              <span className={`font-mono font-bold text-[11px] ${pnlColor(t.pnl)}`}>
+   631→                                {formatPnl(t.pnl)} $
+   632→                              </span>
+   633→                            </div>
+   634→                          </div>
+   635→                        ))}
+   636→                      </div>
+   637→                    )}
+   638→                  </CardContent>
+   639→                </Card>
+   640→              </div>
+   641→            </>
+   642→          )}
+   643→        </div>
+   644→      </div>
+   645→    </div>
+   646→  );
+   647→}
