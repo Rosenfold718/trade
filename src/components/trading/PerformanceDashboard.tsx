@@ -277,7 +277,30 @@ export function PerformanceDashboard({ visible, onClose }: PerformanceDashboardP
             </div>
           )}
 
-          {data && (
+          {data && data.totalTrades === 0 && (
+            <div className="text-center py-16 space-y-4">
+              <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 flex items-center justify-center mx-auto">
+                <BarChart3 className="w-8 h-8 text-emerald-500/50" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold">Нет торговых данных</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Аналитика появится после первых сделок.
+                  {typeof window !== 'undefined' && !window.location.hostname.includes('vercel') ? '' : (
+                    <span className="block mt-2 text-xs text-muted-foreground/70">
+                      На Vercel база данных эфемерна — для полной аналитики нужна облачная БД (PostgreSQL/MySQL).
+                    </span>
+                  )}
+                </p>
+              </div>
+              <div className="text-xs text-muted-foreground/50 space-y-1">
+                <p>Запустите «Авто-скан» или откройте сделку вручную</p>
+                <p>Используйте «Бэктест» для тестирования стратегии на истории</p>
+              </div>
+            </div>
+          )}
+
+          {data && data.totalTrades > 0 && (
             <>
               {/* ═══ Section 1: Key Metrics Grid ═══ */}
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">

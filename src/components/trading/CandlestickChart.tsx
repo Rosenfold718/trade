@@ -107,7 +107,7 @@ export function CandlestickChart({
 
     // ---- Create chart ----
     const chart = createChart(containerRef.current, {
-      width: containerRef.current.clientWidth,
+      autoSize: true,
       height,
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
@@ -291,20 +291,7 @@ export function CandlestickChart({
     };
   }, [data, tradeSignal, height, showIndicators, onCrosshairMove]);
 
-  // ---- Responsive resize ----
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width } = entry.contentRect;
-        if (width > 0 && chartRef.current) {
-          chartRef.current.applyOptions({ width });
-        }
-      }
-    });
-    observer.observe(containerRef.current);
-    return () => observer.disconnect();
-  }, []);
+  // autoSize: true handles resize automatically — no manual ResizeObserver needed
 
   // ---- Legend formatting ----
   const lastDataPoint = data.length > 0 ? data[data.length - 1] : null;

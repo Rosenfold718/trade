@@ -87,7 +87,7 @@ const DAYS = [7, 14, 30, 60, 90];
 export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: BacktestDialogProps) {
   const [coin, setCoin] = useState(defaultCoin);
   const [interval, setInterval_] = useState('1h');
-  const [days, setDays] = useState(30);
+  const [days, setDays] = useState(14);
   const [balance, setBalance] = useState('1000');
   const [leverage, setLeverage] = useState(3);
   const [running, setRunning] = useState(false);
@@ -106,14 +106,21 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
         coin: coin || defaultCoin,
         interval,
         days: String(days),
-        startingBalance: balance,
+        balance,
         leverage: String(leverage),
       });
       const res = await fetch(`/api/crypto/backtest?${params}`);
 
       if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        throw new Error(`HTTP ${res.status}${errText ? `: ${errText.slice(0, 200)}` : ''}`);
+        let errMsg = `HTTP ${res.status}`;
+        try {
+          const errJson = await res.json();
+          errMsg = errJson.error || errMsg;
+        } catch {
+          const errText = await res.text().catch(() => '');
+          if (errText) errMsg = errText.slice(0, 200);
+        }
+        throw new Error(errMsg);
       }
 
       const json = await res.json();
@@ -148,6 +155,7 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
           </DialogTitle>
           <DialogDescription>
             Тестирование торговой стратегии на исторических данных
+            <span className="block mt-1 text-[10px] text-muted-foreground/70">Для быстрых результатов используйте 1Ч–4Ч интервалы и 7–14 дней</span>
           </DialogDescription>
         </DialogHeader>
 

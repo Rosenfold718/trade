@@ -151,20 +151,27 @@ export default function CryptoDashboard() {
     try { const res = await fetch('/api/crypto/market'); if (res.ok) { const json = await res.json(); setCoins(json.data || []); setApiSource(json.source || ''); setLastUpdate(Date.now()); } } catch {} finally { setLoading(false); }
   }, []);
 
-  const fetchChartData = useCallback(async () => {
+  const fetchChartData = useCallback(async (retryCount = 0) => {
     if (!selectedCoin) return;
     if (abortRef.current) abortRef.current.abort();
     abortRef.current = new AbortController();
     setChartLoading(true);
     try {
       const res = await fetch(`/api/crypto/signals?coin=${selectedCoin}&interval=${interval}`, { signal: abortRef.current.signal });
-      if (!res.ok) { setChartData([]); setSignal({ type: 'HOLD', strength: 0, indicators: [], summary: 'Данные недоступны' }); setTradeSignal(null); return; }
+      if (!res.ok) {
+        // Retry up to 2 times with 1.5s delay
+        if (retryCount < 2) {
+          await new Promise(r => setTimeout(r, 1500));
+          return fetchChartData(retryCount + 1);
+        }
+        setChartData([]); setSignal({ type: 'HOLD', strength: 0, indicators: [], summary: 'Данные недоступны. Попробуйте обновить.' }); setTradeSignal(null); return;
+      }
       const json = await res.json();
       setChartData(json.chartData || []);
       setSignal(json.signal || null);
       setTradeSignal(json.tradeSignal || null);
       setApiSource(json.source || apiSource);
-    } catch { setChartData([]); setTradeSignal(null); } finally { setChartLoading(false); }
+    } catch { if (retryCount === 0) return; setChartData([]); setTradeSignal(null); } finally { setChartLoading(false); }
   }, [selectedCoin, interval, apiSource]);
 
   const fetchSentiment = useCallback(async () => {
@@ -387,7 +394,7 @@ export default function CryptoDashboard() {
                   <span className={`text-xs font-bold flex items-center gap-0.5 ${displayChange24h >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{displayChange24h >= 0 ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}{Math.abs(displayChange24h).toFixed(2)}%</span>
                   {realtime.connected && <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /><span className="text-[9px] font-bold text-emerald-500">LIVE</span></span>}
                 </div>
-                <div className="flex gap-3 ml-auto text-[10px]">{selectedCoinData?.market_cap ? <div className="text-center"><div className="text-muted-foreground">Кап.</div><div className="font-mono font-semibold">{formatNumber(selectedCoinData.market_cap)}</div></div> : null}{ts && ts.atr > 0 && <div className="text-center"><div className="text-muted-foreground">ATR</div><div className="font-mono text-blue-500">${formatPrice(ts.atr)}</div></div>}{ts && <div className="text-center"><div className="text-muted-foreground">Подд</div><div className="font-mono text-emerald-500">${formatPrice(ts.support)}</div></div>}{ts && <div className="text-center"><div className="text-muted-foreground">Сопр</div><div className="font-mono text-red-500">${formatPrice(ts.resistance)}</div></div>}</div>
+                <div className="flex gap-3 ml-auto text-[10px]">{selectedCoinData?.market_cap ? <div className="text-center"><div className="text-muted-foreground">Кап.</div><div className="font-mono font-semibold">{formatNumber(selectedCoinData.market_cap)}</div></div> : null}{ts && ts.atr > 0 && <div className="text-center"><div className="text-muted-foreground">ATR</div><div className="font-mono text-blue-500">${formatPrice(ts.atr)}</div></div>}{ts && <div className="text-center"><div className="text-muted-foreground">Подд</div><div className="font-mono text-emerald-500">${formatPrice(ts.support)}</div></div>}{ts && <div className="text-center"><div className="text-muted-foreground">Сопр</div><div className="font-mono text-red-500">${formatPrice(ts.resistance)}</div></div>}<a href={`https://www.tradingview.com/chart/?symbol=BINANCE:${(selectedCoinData?.symbol || 'BTC').toUpperCase()}USDT`} target="_blank" rel="noopener noreferrer" className="text-center text-muted-foreground hover:text-blue-500 transition-colors" title="Открыть на TradingView"><div>Chart</div><div className="font-semibold">TV</div></a></div>
               </div></CardContent></Card>
 
               {ts && (

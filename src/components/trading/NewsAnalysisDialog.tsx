@@ -51,8 +51,23 @@ export function NewsAnalysisDialog({ open, onOpenChange }: NewsAnalysisDialogPro
       const res = await fetch('/api/crypto/news-analysis');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
-      cacheRef.current = { data: json, timestamp: Date.now() };
-      setData(json);
+
+      // API returns { analysis: {...}, rawContent, source, cachedAt }
+      // Component expects flat { outlook, summary, insights, ... }
+      const a = json.analysis || json;
+      const mapped: NewsAnalysisResult = {
+        outlook: a.marketOutlook === 'BULLISH' ? 'Бычий (Bullish)' : a.marketOutlook === 'BEARISH' ? 'Медвежий (Bearish)' : 'Нейтральный',
+        summary: Array.isArray(a.keyInsights) ? a.keyInsights.slice(0, 2).join('. ') + '.' : (a.summary || 'Анализ недоступен'),
+        insights: Array.isArray(a.keyInsights) ? a.keyInsights : [],
+        opportunities: Array.isArray(a.opportunities) ? a.opportunities.map((o: any) => typeof o === 'string' ? o : `${o.coin}: ${o.reason}`) : [],
+        risks: Array.isArray(a.risks) ? a.risks : [],
+        recommendedAction: a.recommendedAction || 'Данных недостаточно',
+        confidence: a.confidence || 0,
+        timestamp: json.cachedAt ? new Date(json.cachedAt).toLocaleString('ru-RU') : new Date().toLocaleString('ru-RU'),
+      };
+
+      cacheRef.current = { data: mapped, timestamp: Date.now() };
+      setData(mapped);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Ошибка загрузки');
     } finally {
