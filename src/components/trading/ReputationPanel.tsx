@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { X, DollarSign, Brain, Cpu } from 'lucide-react';
+import { X, DollarSign, Brain, Cpu, CheckCircle2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,7 @@ interface ReputationPanelProps {
   depositLoading: boolean;
   onScan: () => void;
   scanLoading: boolean;
+  depositSuccess: boolean;
 }
 
 export function ReputationPanel({
@@ -34,6 +35,7 @@ export function ReputationPanel({
   depositLoading,
   onScan,
   scanLoading,
+  depositSuccess,
 }: ReputationPanelProps) {
   const totalCapital = reputation.freeBalance + (reputation.lockedInPositions || 0);
   const pnlPct = ((totalCapital / reputation.initialDeposit) - 1) * 100;
@@ -138,7 +140,13 @@ export function ReputationPanel({
           )}
 
           {/* Deposit funds + Scan button */}
-          <div className="flex items-center gap-2 mt-2">
+          <div className={`relative flex items-center gap-2 mt-2 rounded-lg p-2 -m-2 transition-all duration-500 ${depositSuccess ? 'bg-emerald-500/10 ring-1 ring-emerald-500/30' : ''}`}>
+            {depositSuccess && (
+              <div className="absolute -top-1 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500 text-white text-[9px] font-bold shadow-lg animate-in fade-in slide-in-from-top-1">
+                <CheckCircle2 className="w-3 h-3" />
+                Кредит сохранён
+              </div>
+            )}
             <div className="flex-1 flex items-center gap-1">
               <Input
                 type="number"
@@ -153,10 +161,10 @@ export function ReputationPanel({
                 size="sm"
                 onClick={onDepositSubmit}
                 disabled={depositLoading || !depositAmount}
-                className="h-7 text-[10px] gap-1 bg-amber-500 hover:bg-amber-600 text-white"
+                className={`h-7 text-[10px] gap-1 text-white transition-all ${depositSuccess ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-amber-500 hover:bg-amber-600'}`}
               >
                 <DollarSign className="w-3 h-3" />
-                {depositLoading ? '...' : 'Дать в кредит'}
+                {depositLoading ? '...' : depositSuccess ? 'Готово' : 'Дать в кредит'}
               </Button>
             </div>
             <Button

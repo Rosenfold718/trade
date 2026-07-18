@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useMemo } from 'react';
 import {
   X,
   TrendingUp,
@@ -17,7 +17,6 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
   TableBody,
@@ -37,12 +36,14 @@ import {
   Cell,
   CartesianGrid,
 } from 'recharts';
+import type { ReputationData, Trade } from '@/components/trading/types';
 
 // ─── Types ───
 
 interface PerformanceDashboardProps {
   visible: boolean;
   onClose: () => void;
+  reputation: ReputationData | null;
 }
 
 interface MonthlyBreakdown {
@@ -136,6 +137,244 @@ function pnlBarColor(v: number): string {
   return '#6b7280';
 }
 
+// ─── Analytics computation ───
+
+function computePerformanceData(rep: ReputationData): PerformanceData {
+  const resolved = rep.trades.filter((t) => t.resolved && t.pnlUSDT !== null) as (Trade & {
+    pnlUSDT: number;
+    closedAt: number | null;
+    enteredAt: number | null;
+  })[];
+
+  const totalTrades = resolved.length;
+  const wins = resolved.filter((t) => t.result === 'WIN').length;
+  const losses = resolved.filter((t) => t.result === 'LOSS').length;
+  const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
+
+  const totalPnl = resolved.reduce((s, t) => s + t.pnlUSDT, 0);
+  const totalPnlPct = rep.initialDeposit > 0 ? (totalPnl / rep.initialDeposit) * 100 : 0;
+
+  // Profit factor: gross wins / gross losses
+  const grossWins = resolved
+    .filter((t) => t.pnlUSDT > 0)
+    .reduce((s, t) => s + t.pnlUSDT, 0);
+  const grossLosses = Math.abs(
+    resolved
+      .filter((t) => t.pnlUSDT < 0)
+      .reduce((s, t) => s + t.pnlUSDT, 0),
+  );
+  const profitFactor = grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? Infinity : 0;
+
+  // Average win / loss
+  const winTrades = resolved.filter((t) => t.pnlUSDT > 0);
+  const lossTrades = resolved.filter((t) => t.pnlUSDT < 0);
+  const avgWin = winTrades.length > 0 ? winTrades.reduce((s, t) => s + t.pnlUSDT, 0) / winTrades.length : 0;
+  const avgLoss =
+    lossTrades.length > 0 ? lossTrades.reduce((s, t) => s + t.pnlUSDT, 0) / lossTrades.length : 0;
+
+  // Expectancy
+  const expectancy =
+    totalTrades > 0
+      ? (winRate / 100) * avgWin + ((100 - winRate) / 100) * avgLoss
+      : 0;
+
+  // PnL array for Sharpe/Sortino/MaxDD
+  const pnlArr = resolved.map((t) => t.pnlUSDT);
+  const mean = totalTrades > 0 ? totalPnl / totalTrades : 0;
+  const variance =
+    totalTrades > 1
+      ? pnlArr.reduce((s, v) => s + (v - mean) ** 2, 0) / (totalTrades - 1)
+      : 0;
+  const stdDev = Math.sqrt(variance);
+  const sharpeRatio = stdDev > 0 ? mean / stdDev : 0;
+
+  // Sortino (downside deviation)
+  const downsideVariance =
+    totalTrades > 0
+      ? pnlArr.filter((v) => v < 0).reduce((s, v) => s + v ** 2, 0) / totalTrades
+      : 0;
+  const downsideDev = Math.sqrt(downsideVariance);
+  const sortinoRatio = downsideDev > 0 ? mean / downsideDev : mean >= 0 ? Infinity : 0;
+
+  // Max drawdown from depositHistory
+  let maxDrawdown = 0;
+  if (rep.depositHistory.length > 0) {
+    let peak = rep.depositHistory[0].equity;
+    for (const snap of rep.depositHistory) {
+      if (snap.equity > peak) peak = snap.equity;
+      const dd = peak > 0 ? ((peak - snap.equity) / peak) * 100 : 0;
+      if (dd > maxDrawdown) maxDrawdown = dd;
+    }
+  }
+
+  // Calmar ratio: annualized return / max drawdown
+  const annualizedReturn = rep.initialDeposit > 0 ? totalPnlPct : 0;
+  const calmarRatio = maxDrawdown > 0 ? annualizedReturn / maxDrawdown : annualizedReturn >= 0 ? Infinity : 0;
+
+  // Consecutive wins/losses
+  let consecutiveWins = 0;
+  let consecutiveLosses = 0;
+  let curW = 0;
+  let curL = 0;
+  for (const t of resolved) {
+    if (t.result === 'WIN') {
+      curW++;
+      curL = 0;
+      if (curW > consecutiveWins) consecutiveWins = curW;
+    } else if (t.result === 'LOSS') {
+      curL++;
+      curW = 0;
+      if (curL > consecutiveLosses) consecutiveLosses = curL;
+    }
+  }
+
+  // Best/worst trade
+  const bestTrade =
+    resolved.length > 0 ? Math.max(...resolved.map((t) => t.pnlUSDT)) : 0;
+  const worstTrade =
+    resolved.length > 0 ? Math.min(...resolved.map((t) => t.pnlUSDT)) : 0;
+
+  // Equity curve from depositHistory
+  const equityCurve = rep.depositHistory.map((s) => ({
+    timestamp: s.timestamp,
+    equity: s.equity,
+    balance: s.balance,
+  }));
+
+  // Monthly breakdown
+  const monthMap = new Map<string, { wins: number; losses: number; expired: number; pnl: number }>();
+  for (const t of resolved) {
+    const closedTs = t.closedAt ?? t.timestamp;
+    const d = new Date(closedTs);
+    const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const label = d.toLocaleDateString('ru-RU', { month: 'short', year: '2-digit' });
+    if (!monthMap.has(monthKey)) monthMap.set(monthKey, { wins: 0, losses: 0, expired: 0, pnl: 0 });
+    const m = monthMap.get(monthKey)!;
+    m.pnl += t.pnlUSDT;
+    if (t.result === 'WIN') m.wins++;
+    else if (t.result === 'LOSS') m.losses++;
+    else m.expired++;
+  }
+  const monthlyBreakdown: MonthlyBreakdown[] = Array.from(monthMap.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, val]) => {
+      const d = new Date(key + '-01');
+      return {
+        month: key,
+        label: d.toLocaleDateString('ru-RU', { month: 'short', year: '2-digit' }),
+        trades: val.wins + val.losses + val.expired,
+        wins: val.wins,
+        losses: val.losses,
+        expired: val.expired,
+        pnl: val.pnl,
+        winRate:
+          val.wins + val.losses > 0
+            ? Math.round((val.wins / (val.wins + val.losses)) * 100)
+            : 0,
+      };
+    });
+
+  // Direction breakdown
+  const dirMap = new Map<string, { wins: number; losses: number; pnl: number }>();
+  for (const t of resolved) {
+    const dir = t.direction;
+    if (!dirMap.has(dir)) dirMap.set(dir, { wins: 0, losses: 0, pnl: 0 });
+    const d = dirMap.get(dir)!;
+    d.pnl += t.pnlUSDT;
+    if (t.result === 'WIN') d.wins++;
+    else if (t.result === 'LOSS') d.losses++;
+  }
+  const directionBreakdown: DirectionStats[] = Array.from(dirMap.entries()).map(
+    ([dir, val]) => ({
+      direction: dir,
+      total: val.wins + val.losses,
+      wins: val.wins,
+      losses: val.losses,
+      winRate:
+        val.wins + val.losses > 0
+          ? Math.round((val.wins / (val.wins + val.losses)) * 100)
+          : 0,
+      totalPnl: val.pnl,
+      avgPnl: val.wins + val.losses > 0 ? val.pnl / (val.wins + val.losses) : 0,
+    }),
+  );
+
+  // Coin breakdown (top 5)
+  const coinMap = new Map<string, { wins: number; losses: number; pnl: number; symbol: string }>();
+  for (const t of resolved) {
+    if (!coinMap.has(t.coinId)) coinMap.set(t.coinId, { wins: 0, losses: 0, pnl: 0, symbol: t.coinSymbol });
+    const c = coinMap.get(t.coinId)!;
+    c.pnl += t.pnlUSDT;
+    if (t.result === 'WIN') c.wins++;
+    else if (t.result === 'LOSS') c.losses++;
+  }
+  const coinBreakdown: CoinStats[] = Array.from(coinMap.entries())
+    .map(([id, val]) => ({
+      coinId: id,
+      coinSymbol: val.symbol,
+      total: val.wins + val.losses,
+      wins: val.wins,
+      losses: val.losses,
+      winRate:
+        val.wins + val.losses > 0
+          ? Math.round((val.wins / (val.wins + val.losses)) * 100)
+          : 0,
+      totalPnl: val.pnl,
+    }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 5);
+
+  // Average hold time
+  const holdTrades = resolved.filter((t) => t.enteredAt && t.closedAt);
+  const avgHoldHours =
+    holdTrades.length > 0
+      ? holdTrades.reduce((s, t) => s + ((t.closedAt! - t.enteredAt!) / (1000 * 3600)), 0) /
+        holdTrades.length
+      : 0;
+
+  // Average PnL per trade
+  const avgPnlPerTrade = totalTrades > 0 ? totalPnl / totalTrades : 0;
+
+  // Recent trend: last 10 resolved trades sorted by closedAt desc
+  const recentTrend: RecentTrend[] = [...resolved]
+    .sort((a, b) => (b.closedAt ?? b.timestamp) - (a.closedAt ?? a.timestamp))
+    .slice(0, 10)
+    .map((t) => ({
+      tradeId: t.id,
+      coinSymbol: t.coinSymbol,
+      direction: t.direction,
+      pnl: t.pnlUSDT,
+      timestamp: t.closedAt ?? t.timestamp,
+    }));
+
+  return {
+    totalPnl,
+    totalPnlPct,
+    winRate,
+    profitFactor,
+    sharpeRatio,
+    maxDrawdown,
+    totalTrades,
+    avgWin,
+    avgLoss,
+    expectancy,
+    calmarRatio,
+    sortinoRatio,
+    consecutiveWins,
+    consecutiveLosses,
+    bestTrade,
+    worstTrade,
+    initialDeposit: rep.initialDeposit,
+    equityCurve,
+    monthlyBreakdown,
+    directionBreakdown,
+    coinBreakdown,
+    avgHoldHours,
+    avgPnlPerTrade,
+    recentTrend,
+  };
+}
+
 // ─── Metric Card ───
 
 function MetricCard({
@@ -189,34 +428,107 @@ function MonthlyTooltip({ active, payload, label }: any) {
 
 // ─── Main Component ───
 
-export function PerformanceDashboard({ visible, onClose }: PerformanceDashboardProps) {
-  const [data, setData] = useState<PerformanceData | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/crypto/performance');
-      if (!res.ok) throw new Error('Ошибка загрузки');
-      const json = await res.json();
-      setData(json);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Ошибка');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (visible) fetchData();
-  }, [visible, fetchData]);
+export function PerformanceDashboard({ visible, onClose, reputation }: PerformanceDashboardProps) {
+  const data = useMemo<PerformanceData | null>(() => {
+    if (!reputation) return null;
+    return computePerformanceData(reputation);
+  }, [reputation]);
 
   if (!visible) return null;
 
-  const pnl = data?.totalPnl ?? 0;
-  const pnlPct = data?.totalPnlPct ?? 0;
+  // No resolved trades — show friendly empty state
+  if (data && data.totalTrades === 0) {
+    return (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4" onClick={onClose}>
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+        <div
+          className="relative bg-card border border-border rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] overflow-hidden flex flex-col"
+          onClick={e => e.stopPropagation()}
+        >
+          {/* ── Header ── */}
+          <div className="flex-shrink-0 px-5 py-3 border-b border-border bg-gradient-to-r from-emerald-500/10 via-transparent to-transparent">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                  <BarChart3 className="w-4 h-4 text-emerald-500" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold">Аналитика P&L</h2>
+                  <div className="text-[10px] text-muted-foreground">
+                    Комплексная статистика производительности
+                  </div>
+                </div>
+              </div>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose}>
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+
+          {/* ── Empty State ── */}
+          <div className="text-center py-16 space-y-4">
+            <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 flex items-center justify-center mx-auto">
+              <BarChart3 className="w-8 h-8 text-emerald-500/50" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold">Нет завершенных сделок для анализа</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                Аналитика появится после завершения первых сделок.
+              </p>
+            </div>
+            <div className="text-xs text-muted-foreground/50 space-y-1">
+              <p>Запустите «Авто-скан» или откройте сделку вручную</p>
+              <p>Используйте «Бэктест» для тестирования стратегии на истории</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // No reputation data at all
+  if (!data) {
+    return (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4" onClick={onClose}>
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+        <div
+          className="relative bg-card border border-border rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] overflow-hidden flex flex-col"
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="flex-shrink-0 px-5 py-3 border-b border-border bg-gradient-to-r from-emerald-500/10 via-transparent to-transparent">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                  <BarChart3 className="w-4 h-4 text-emerald-500" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold">Аналитика P&L</h2>
+                  <div className="text-[10px] text-muted-foreground">
+                    Комплексная статистика производительности
+                  </div>
+                </div>
+              </div>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose}>
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+          <div className="text-center py-16 space-y-4">
+            <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 flex items-center justify-center mx-auto">
+              <BarChart3 className="w-8 h-8 text-emerald-500/50" />
+            </div>
+            <h3 className="text-lg font-bold">Данные не загружены</h3>
+            <p className="text-sm text-muted-foreground">
+              Дождитесь загрузки данных репутации.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const pnl = data.totalPnl;
+  const pnlPct = data.totalPnlPct;
   const isProfit = pnl >= 0;
 
   return (
@@ -241,15 +553,6 @@ export function PerformanceDashboard({ visible, onClose }: PerformanceDashboardP
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 text-[10px] gap-1"
-                onClick={fetchData}
-                disabled={loading}
-              >
-                {loading ? 'Загрузка...' : 'Обновить'}
-              </Button>
               <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose}>
                 <X className="w-4 h-4" />
               </Button>
@@ -259,47 +562,6 @@ export function PerformanceDashboard({ visible, onClose }: PerformanceDashboardP
 
         {/* ── Content ── */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {loading && !data && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <Skeleton key={i} className="h-20 rounded-xl" />
-                ))}
-              </div>
-              <Skeleton className="h-40 rounded-xl" />
-              <Skeleton className="h-60 rounded-xl" />
-            </div>
-          )}
-
-          {error && !data && (
-            <div className="text-center py-10 text-muted-foreground text-sm">
-              {error}
-            </div>
-          )}
-
-          {data && data.totalTrades === 0 && (
-            <div className="text-center py-16 space-y-4">
-              <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 flex items-center justify-center mx-auto">
-                <BarChart3 className="w-8 h-8 text-emerald-500/50" />
-              </div>
-              <div>
-                <h3 className="text-lg font-bold">Нет торговых данных</h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Аналитика появится после первых сделок.
-                  {typeof window !== 'undefined' && !window.location.hostname.includes('vercel') ? '' : (
-                    <span className="block mt-2 text-xs text-muted-foreground/70">
-                      На Vercel база данных эфемерна — для полной аналитики нужна облачная БД (PostgreSQL/MySQL).
-                    </span>
-                  )}
-                </p>
-              </div>
-              <div className="text-xs text-muted-foreground/50 space-y-1">
-                <p>Запустите «Авто-скан» или откройте сделку вручную</p>
-                <p>Используйте «Бэктест» для тестирования стратегии на истории</p>
-              </div>
-            </div>
-          )}
-
           {data && data.totalTrades > 0 && (
             <>
               {/* ═══ Section 1: Key Metrics Grid ═══ */}

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   Loader2, FlaskConical, Play, ChevronDown, ChevronUp,
 } from 'lucide-react';
@@ -94,12 +94,69 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showTrades, setShowTrades] = useState(false);
+  const [retryAfter, setRetryAfter] = useState(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  const debounceRef = useRef<number | null>(null);
+  const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const retryAfterRef = useRef(0);
+  const autoRetryRef = useRef(false);
+  const countdownActiveRef = useRef(false);
+
+  // Countdown timer for rate limit
+  useEffect(() => {
+    if (retryAfter <= 0) {
+      countdownActiveRef.current = false;
+      return;
+    }
+    if (countdownActiveRef.current) return;
+    countdownActiveRef.current = true;
+    const timer = setInterval(() => {
+      setRetryAfter(prev => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          countdownActiveRef.current = false;
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [retryAfter]);
+
+  // Keep retryAfterRef in sync
+  useEffect(() => {
+    retryAfterRef.current = retryAfter;
+  }, [retryAfter]);
+
+  // Auto-retry when countdown expires
+  useEffect(() => {
+    if (retryAfter === 0 && autoRetryRef.current) {
+      autoRetryRef.current = false;
+      runBacktest();
+    }
+  }, [retryAfter]);
 
   const runBacktest = useCallback(async () => {
+    // Debounce: ignore clicks within 5 seconds
+    const now = Date.now();
+    if (debounceRef.current && now - debounceRef.current < 5000) {
+      return;
+    }
+    debounceRef.current = now;
+
     setRunning(true);
     setError(null);
     setResult(null);
     setShowTrades(false);
+    setRetryAfter(0);
+    setElapsedSeconds(0);
+
+    // Start elapsed time counter
+    const startMs = Date.now();
+    elapsedRef.current = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startMs) / 1000));
+    }, 1000);
 
     try {
       const params = new URLSearchParams({
@@ -113,22 +170,45 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
 
       if (!res.ok) {
         let errMsg = `HTTP ${res.status}`;
+        let parsedRetryAfter = 0;
         try {
           const errJson = await res.json();
           errMsg = errJson.error || errMsg;
+          if (errJson.retryAfter) {
+            parsedRetryAfter = Math.max(1, Math.ceil(Number(errJson.retryAfter)));
+          }
         } catch {
           const errText = await res.text().catch(() => '');
           if (errText) errMsg = errText.slice(0, 200);
         }
+
+        // Handle 429 with countdown
+        if (res.status === 429 && parsedRetryAfter > 0) {
+          setRetryAfter(parsedRetryAfter);
+          autoRetryRef.current = true;
+          throw new Error(`Превышен лимит запросов. Повтор через ${parsedRetryAfter}с...`);
+        }
+
         throw new Error(errMsg);
       }
 
       const json = await res.json();
       setResult(json);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Ошибка запуска бэктеста');
+      // Don't overwrite error if we already set retryAfter (auto-retry will handle it)
+      if (retryAfterRef.current > 0 && autoRetryRef.current) {
+        setError(null);
+      } else {
+        setError(e instanceof Error ? e.message : 'Ошибка запуска бэктеста');
+      }
     } finally {
-      setRunning(false);
+      if (elapsedRef.current) {
+        clearInterval(elapsedRef.current);
+        elapsedRef.current = null;
+      }
+      if (retryAfterRef.current <= 0 || !autoRetryRef.current) {
+        setRunning(false);
+      }
     }
   }, [coin, interval, days, balance, leverage, defaultCoin]);
 
@@ -229,13 +309,18 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
 
         <Button
           onClick={runBacktest}
-          disabled={running || !balance || parseFloat(balance) < 100}
+          disabled={running || retryAfter > 0 || !balance || parseFloat(balance) < 100}
           className="w-full gap-2"
         >
           {running ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              Выполняется бэктест...
+              Выполняется бэктест... {elapsedSeconds > 0 && `(${elapsedSeconds}с)`}
+            </>
+          ) : retryAfter > 0 ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Повтор через {retryAfter}с...
             </>
           ) : (
             <>
@@ -253,11 +338,25 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
         )}
 
         {/* Running spinner (prominent) */}
-        {running && !result && (
+        {running && !result && !error && (
           <div className="flex flex-col items-center justify-center py-8 gap-3">
             <Loader2 className="w-12 h-12 animate-spin text-cyan-500" />
-            <p className="text-sm text-muted-foreground">Анализ {days} дней на {interval} свечах...</p>
+            <p className="text-sm text-muted-foreground">
+              Анализ {days} дней на {interval} свечах...{' '}
+              <span className="font-mono text-foreground">{elapsedSeconds}с</span>
+            </p>
             <p className="text-xs text-muted-foreground/60">Это может занять 30+ секунд</p>
+          </div>
+        )}
+
+        {/* Rate limit countdown */}
+        {retryAfter > 0 && !running && (
+          <div className="flex flex-col items-center justify-center py-4 gap-2">
+            <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
+            <p className="text-sm text-amber-600 dark:text-amber-400">
+              Превышен лимит запросов. Автоматический повтор через{' '}
+              <span className="font-mono font-bold">{retryAfter}с</span>
+            </p>
           </div>
         )}
 

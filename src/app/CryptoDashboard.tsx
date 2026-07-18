@@ -38,6 +38,35 @@ import type {
 import { formatPrice, formatNumber, formatTimeAgo } from '@/components/trading/types';
 
 // ============================================
+// Client-side trader persistence (Vercel has no persistent FS)
+// ============================================
+const TRADER_LOCAL_KEY = 'intrade-trader-overrides';
+
+interface LocalTraderOverrides {
+  balance?: number;
+  totalDebt?: number;
+  debtHistory?: any[];
+  depositHistory?: any[];
+  initialDeposit?: number;
+}
+
+function loadLocalTraderOverrides(): LocalTraderOverrides | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(TRADER_LOCAL_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function saveLocalTraderOverrides(data: LocalTraderOverrides) {
+  if (typeof window === 'undefined') return;
+  try {
+    const existing = loadLocalTraderOverrides() || {};
+    localStorage.setItem(TRADER_LOCAL_KEY, JSON.stringify({ ...existing, ...data }));
+  } catch {}
+}
+
+// ============================================
 // Sub-charts (RSI + MACD) — kept inline as they are small
 // ============================================
 function MiniLineChart({ data, color, yMin, yMax, refLines }: { data: number[]; color: string; yMin: number; yMax: number; refLines?: number[] }) {
@@ -106,6 +135,14 @@ export default function CryptoDashboard() {
   const [selectedTrade, setSelectedTrade] = useState<Trade | null>(null);
   const [depositAmount, setDepositAmount] = useState<string>('');
   const [depositLoading, setDepositLoading] = useState(false);
+  const [depositSuccess, setDepositSuccess] = useState(false);
+
+  // Auto-reset deposit success flash after 2.5s
+  useEffect(() => {
+    if (!depositSuccess) return;
+    const t = setTimeout(() => setDepositSuccess(false), 2500);
+    return () => clearTimeout(t);
+  }, [depositSuccess]);
   const [scanResult, setScanResult] = useState<{ opportunities: any[] } | null>(null);
   const [scanLoading, setScanLoading] = useState(false);
   const [traderThinking, setTraderThinking] = useState<any>(null);
@@ -179,7 +216,25 @@ export default function CryptoDashboard() {
   }, []);
 
   const fetchReputation = useCallback(async () => {
-    try { const res = await fetch('/api/crypto/reputation'); if (res.ok) setReputation(await res.json()); } catch {}
+    try {
+      const res = await fetch('/api/crypto/reputation');
+      if (res.ok) {
+        const serverData = await res.json();
+        // Merge with localStorage persisted data (credit/deposit history)
+        const localOverrides = loadLocalTraderOverrides();
+        if (localOverrides) {
+          serverData.balance = localOverrides.balance ?? serverData.balance;
+          serverData.totalDebt = localOverrides.totalDebt ?? serverData.totalDebt;
+          serverData.debtHistory = localOverrides.debtHistory ?? serverData.debtHistory;
+          serverData.depositHistory = localOverrides.depositHistory ?? serverData.depositHistory;
+          serverData.initialDeposit = localOverrides.initialDeposit ?? serverData.initialDeposit;
+          serverData.freeBalance = serverData.balance - (serverData.trades || [])
+            .filter((t: Trade) => !t.resolved)
+            .reduce((sum: number, t: Trade) => sum + t.positionSize, 0);
+        }
+        setReputation(serverData);
+      }
+    } catch {}
   }, []);
 
   const recordThought = useCallback(async (thought: any) => {
@@ -195,8 +250,31 @@ export default function CryptoDashboard() {
     if (!amount || amount <= 0) return;
     setDepositLoading(true);
     try {
-      const res = await fetch('/api/crypto/reputation', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount, label: `Кредит #${(reputation?.debtHistory?.length || 0) + 1}` }) });
-      if (res.ok) { setDepositAmount(''); fetchReputation(); }
+      // Always persist credit locally (Vercel has no persistent FS)
+      const overrides = loadLocalTraderOverrides() || {};
+      const currentBalance = overrides.balance ?? reputation?.balance ?? 100;
+      const currentDebt = overrides.totalDebt ?? reputation?.totalDebt ?? 0;
+      const currentDebtHistory = overrides.debtHistory ?? reputation?.debtHistory ?? [];
+      const currentDepositHistory = overrides.depositHistory ?? reputation?.depositHistory ?? [];
+      const currentInitial = overrides.initialDeposit ?? reputation?.initialDeposit ?? 100;
+
+      const newBalance = currentBalance + amount;
+      const newDebt = currentDebt + amount;
+      const newDebtHistory = [...currentDebtHistory, { timestamp: Date.now(), amount, remainingOwed: amount, label: `Кредит #${currentDebtHistory.length + 1}` }];
+      const newDepositHistory = [...currentDepositHistory, { timestamp: Date.now(), balance: newBalance, equity: newBalance }];
+
+      saveLocalTraderOverrides({
+        balance: newBalance,
+        totalDebt: newDebt,
+        debtHistory: newDebtHistory,
+        depositHistory: newDepositHistory,
+        initialDeposit: currentInitial,
+      });
+
+      setDepositAmount('');
+      setDepositSuccess(true);
+      // Re-fetch to merge
+      fetchReputation();
     } catch {} finally { setDepositLoading(false); }
   }, [depositAmount, fetchReputation, reputation]);
 
@@ -273,6 +351,24 @@ export default function CryptoDashboard() {
     const text = `${ts.direction === 'LONG' ? '🟢 ЛОНГ' : '🔴 ШОРТ'} ${(selectedCoinData?.symbol || selectedCoin).toUpperCase()}/USDT\n📊 Уверенность: ${ts.confidence}%\n💰 Вход: $${formatPrice(ts.entry)}\n🛑 Стоп: $${formatPrice(ts.stopLoss)}\n🎯 TP1: $${formatPrice(ts.takeProfit1)}\n🎯 TP2: $${formatPrice(ts.takeProfit2)}\n📐 R:R = ${ts.riskReward.toFixed(2)}\n⏱ ${ts.holdDuration}\n✅ ${ts.reasons.slice(0, 3).join(' | ')}`;
     navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
   }, [ts, selectedCoinData, selectedCoin]);
+
+  // Load trader overrides from localStorage on mount
+  useEffect(() => {
+    const overrides = loadLocalTraderOverrides();
+    if (overrides && reputation) {
+      setReputation(prev => prev ? {
+        ...prev,
+        balance: overrides.balance ?? prev.balance,
+        totalDebt: overrides.totalDebt ?? prev.totalDebt,
+        debtHistory: overrides.debtHistory ?? prev.debtHistory,
+        depositHistory: overrides.depositHistory ?? prev.depositHistory,
+        initialDeposit: overrides.initialDeposit ?? prev.initialDeposit,
+        freeBalance: (overrides.balance ?? prev.balance) - (prev.trades || [])
+          .filter((t: Trade) => !t.resolved)
+          .reduce((sum: number, t: Trade) => sum + t.positionSize, 0),
+      } : prev);
+    }
+  }, []);
 
   // ---- Effects ----
   useEffect(() => { fetchMarketData(); fetchSentiment(); fetchReputation(); }, [fetchMarketData, fetchSentiment, fetchReputation]);
@@ -477,7 +573,7 @@ export default function CryptoDashboard() {
 
       {/* Performance Dashboard Overlay */}
       {showPerformanceDashboard && (
-        <PerformanceDashboard visible={showPerformanceDashboard} onClose={() => setShowPerformanceDashboard(false)} />
+        <PerformanceDashboard visible={showPerformanceDashboard} onClose={() => setShowPerformanceDashboard(false)} reputation={reputation} />
       )}
 
       {/* News Analysis Dialog */}
@@ -499,6 +595,7 @@ export default function CryptoDashboard() {
           depositLoading={depositLoading}
           onScan={scanAndTrade}
           scanLoading={scanLoading}
+          depositSuccess={depositSuccess}
         />
       )}
 

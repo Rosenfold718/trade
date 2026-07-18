@@ -66,7 +66,11 @@ function hourlyToOHLCV(prices: number[][], volumes: number[][]): OHLCV[] {
 
 // Fetch OHLCV from multiple sources with fallback
 async function fetchOHLCV(coinId: string, interval: string, limit: number): Promise<{ data: OHLCV[]; source: string }> {
-  const timeoutMs = 8000;
+  const timeoutMs = 5000;
+
+  // Determine proper CoinGecko days based on interval
+  const cgDays: Record<string, number> = { '1m': 1, '5m': 1, '15m': 1, '1h': 7, '4h': 30 };
+  const daysParam = cgDays[interval] || 1;
 
   // Strategy 1: Binance
   const binanceSymbol = getBinanceSymbol(coinId);
@@ -126,7 +130,7 @@ async function fetchOHLCV(coinId: string, interval: string, limit: number): Prom
     const ctrl3 = new AbortController();
     const timer3 = setTimeout(() => ctrl3.abort(), timeoutMs);
     const cgResponse = await fetch(
-      `${COINGECKO_BASE}/coins/${coinId}/ohlcv?vs_currency=usd&days=1`,
+      `${COINGECKO_BASE}/coins/${coinId}/ohlcv?vs_currency=usd&days=${daysParam}`,
       { headers: { 'Accept': 'application/json' }, cache: 'no-store', signal: ctrl3.signal }
     );
     clearTimeout(timer3);
@@ -147,7 +151,7 @@ async function fetchOHLCV(coinId: string, interval: string, limit: number): Prom
     const ctrl4 = new AbortController();
     const timer4 = setTimeout(() => ctrl4.abort(), timeoutMs);
     const chartResponse = await fetch(
-      `${COINGECKO_BASE}/coins/${coinId}/market_chart?vs_currency=usd&days=1`,
+      `${COINGECKO_BASE}/coins/${coinId}/market_chart?vs_currency=usd&days=${daysParam}`,
       { headers: { 'Accept': 'application/json' }, cache: 'no-store', signal: ctrl4.signal }
     );
     clearTimeout(timer4);

@@ -17,7 +17,7 @@ import { runBacktest, type BacktestConfig } from '@/lib/backtester';
  *   maxPositions (default 3)      Max concurrent open positions
  */
 export async function GET(request: Request) {
-  // --- Rate limiting: 2 requests per 60 seconds ---
+  // --- Rate limiting: 5 requests per 60 seconds ---
   const clientIp =
     request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
   const rl = rateLimit(`backtest:${clientIp}`, RATE_LIMITS.backtest);
@@ -25,7 +25,7 @@ export async function GET(request: Request) {
   if (!rl.allowed) {
     const retryAfterSeconds = Math.ceil((rl.resetAt - Date.now()) / 1000);
     return NextResponse.json(
-      { error: 'Rate limit exceeded. Backtest allows 2 requests per 60 seconds.', retryAfter: retryAfterSeconds },
+      { error: 'Превышен лимит запросов. Доступно 5 запросов за 60 секунд.', retryAfter: retryAfterSeconds },
       {
         status: 429,
         headers: {
@@ -136,9 +136,26 @@ export async function GET(request: Request) {
       );
     }
 
+    const msg = err?.message || String(err);
     console.error('[backtest] Unexpected error:', err);
+
+    // Provide clearer error for data fetch failures
+    if (msg.includes('fetch') || msg.includes('network') || msg.includes('ECONNREFUSED') || msg.includes('ETIMEDOUT') || msg.includes('abort') || msg.includes('timeout')) {
+      return NextResponse.json(
+        { error: 'Не удалось получить исторические данные. Проверьте подключение к интернету или попробуйте позже.' },
+        { status: 502 },
+      );
+    }
+
+    if (msg.includes('No data') || msg.includes('empty') || msg.includes('недостаточно')) {
+      return NextResponse.json(
+        { error: 'Недостаточно исторических данных для выбранных параметров. Попробуйте увеличить количество дней или выбрать другой интервал.' },
+        { status: 422 },
+      );
+    }
+
     return NextResponse.json(
-      { error: `Backtest failed: ${err.message || String(err)}` },
+      { error: `Ошибка бэктеста: ${msg}` },
       { status: 500 },
     );
   }

@@ -58,7 +58,10 @@ export async function GET(request: Request) {
     try {
       const binanceSymbol = symbol + 'USDT';
       const url = `${BINANCE_BASE}/klines?symbol=${binanceSymbol}&interval=${interval}&limit=${limit}`;
-      const response = await fetch(url, { cache: 'no-store' });
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5000);
+      const response = await fetch(url, { cache: 'no-store', signal: ctrl.signal });
+      clearTimeout(timer);
       if (response.ok) {
         const data = await response.json();
         if (Array.isArray(data) && data.length > 0 && !(data as any).code) {
@@ -75,10 +78,13 @@ export async function GET(request: Request) {
     try {
       const bybitSymbol = symbol + 'USDT';
       const bybitInterval = getBybitInterval(d);
+      const ctrl2 = new AbortController();
+      const timer2 = setTimeout(() => ctrl2.abort(), 5000);
       const bybitResponse = await fetch(
         `${BYBIT_BASE}/kline?category=spot&symbol=${bybitSymbol}&interval=${bybitInterval}&limit=${Math.min(limit, 200)}`,
-        { cache: 'no-store' }
+        { cache: 'no-store', signal: ctrl2.signal }
       );
+      clearTimeout(timer2);
       if (bybitResponse.ok) {
         const data = await bybitResponse.json();
         if (data.retCode === 0 && data.result?.list?.length > 0) {
@@ -94,10 +100,13 @@ export async function GET(request: Request) {
 
     // Strategy 3: CoinGecko OHLCV
     try {
+      const ctrl3 = new AbortController();
+      const timer3 = setTimeout(() => ctrl3.abort(), 5000);
       const cgResponse = await fetch(
         `${COINGECKO_BASE}/coins/${id}/ohlcv?vs_currency=usd&days=${days}`,
-        { headers: { 'Accept': 'application/json' }, cache: 'no-store' }
+        { headers: { 'Accept': 'application/json' }, cache: 'no-store', signal: ctrl3.signal }
       );
+      clearTimeout(timer3);
       if (cgResponse.ok) {
         const data = await cgResponse.json();
         if (Array.isArray(data) && data.length > 0 && !(data as any).status) {
@@ -112,10 +121,13 @@ export async function GET(request: Request) {
 
     // Strategy 4: CoinGecko market_chart
     try {
+      const ctrl4 = new AbortController();
+      const timer4 = setTimeout(() => ctrl4.abort(), 5000);
       const chartResponse = await fetch(
         `${COINGECKO_BASE}/coins/${id}/market_chart?vs_currency=usd&days=${days}`,
-        { headers: { 'Accept': 'application/json' }, cache: 'no-store' }
+        { headers: { 'Accept': 'application/json' }, cache: 'no-store', signal: ctrl4.signal }
       );
+      clearTimeout(timer4);
       if (chartResponse.ok) {
         const data = await chartResponse.json();
         if (data.prices && Array.isArray(data.prices) && data.prices.length > 0) {
