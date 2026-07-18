@@ -1,0 +1,813 @@
+     1→/**
+     2→ * trading-db.ts — Comprehensive database access layer for the crypto trading system.
+     3→ *
+     4→ * All JSON fields (reasons, avoidCoins, tags, marketEntryConditions, partialExits)
+     5→ * are stored as String in SQLite and parsed/stringified here.
+     6→ *
+     7→ * All timestamp fields use BigInt (Unix ms) to avoid 32-bit INT overflow in SQLite.
+     8→ */
+     9→
+    10→import { db } from './db';
+    11→
+    12→// ─── JSON helpers ─────────────────────────────────────────────────────────────
+    13→
+    14→function parseJson<T>(raw: string | null | undefined, fallback: T): T {
+    15→  if (!raw) return fallback;
+    16→  try { return JSON.parse(raw) as T; }
+    17→  catch { return fallback; }
+    18→}
+    19→
+    20→function stringifyJson(val: unknown): string {
+    21→  return JSON.stringify(val ?? []);
+    22→}
+    23→
+    24→/** Convert a number (e.g. Date.now() or JSON timestamp) to BigInt for Prisma. */
+    25→function ts(val: number | bigint | null | undefined): bigint | null {
+    26→  if (val == null) return null;
+    27→  return typeof val === 'bigint' ? val : BigInt(val);
+    28→}
+    29→
+    30→/** Current time as BigInt. */
+    31→function nowTs(): bigint {
+    32→  return BigInt(Date.now());
+    33→}
+    34→
+    35→// ─── Types ────────────────────────────────────────────────────────────────────
+    36→
+    37→export interface AdaptiveParams {
+    38→  minSlDistancePct: number;
+    39→  minConfidence: number;
+    40→  avoidCoins: string[];
+    41→  minRr: number;
+    42→  counterTrendPenalty: number;
+    43→  limitExpiryHours: number;
+    44→  marketEntryConditions: string[];
+    45→  lessonsVersion: number;
+    46→}
+    47→
+    48→export interface PartialExit {
+    49→  tpLevel: number;
+    50→  percent: number;
+    51→  price: number;
+    52→  closedAt: number | null;
+    53→  pnl: number;
+    54→}
+    55→
+    56→export interface TradingStats {
+    57→  totalTrades: number;
+    58→  wins: number;
+    59→  losses: number;
+    60→  expired: number;
+    61→  winRate: number;
+    62→  avgPnl: number;
+    63→  totalPnl: number;
+    64→  bestTrade: number;
+    65→  worstTrade: number;
+    66→  profitFactor: number;
+    67→  sharpeRatio: number;
+    68→  sortinoRatio: number;
+    69→  maxDrawdown: number;
+    70→  calmarRatio: number;
+    71→  avgWin: number;
+    72→  avgLoss: number;
+    73→  expectancy: number;
+    74→  consecutiveWins: number;
+    75→  consecutiveLosses: number;
+    76→}
+    77→
+    78→// ─── TraderState ──────────────────────────────────────────────────────────────
+    79→
+    80→export async function getTraderState() {
+    81→  let state = await db.traderState.findUnique({ where: { id: 'singleton' } });
+    82→  if (!state) {
+    83→    state = await db.traderState.create({ data: { id: 'singleton' } });
+    84→  }
+    85→  return state;
+    86→}
+    87→
+    88→export async function updateTraderState(updates: Record<string, unknown>) {
+    89→  return db.traderState.upsert({
+    90→    where: { id: 'singleton' },
+    91→    update: {
+    92→      ...updates,
+    93→      lastUpdated: nowTs(),
+    94→    } as any,
+    95→    create: {
+    96→      id: 'singleton',
+    97→      ...updates,
+    98→      lastUpdated: nowTs(),
+    99→    } as any,
+   100→  });
+   101→}
+   102→
+   103→// ─── Adaptive Params ──────────────────────────────────────────────────────────
+   104→
+   105→export async function getAdaptiveParams(): Promise<AdaptiveParams> {
+   106→  const state = await getTraderState();
+   107→  return {
+   108→    minSlDistancePct: state.adaptiveMinSlDistancePct,
+   109→    minConfidence: state.adaptiveMinConfidence,
+   110→    avoidCoins: parseJson<string[]>(state.adaptiveAvoidCoins, []),
+   111→    minRr: state.adaptiveMinRr,
+   112→    counterTrendPenalty: state.adaptiveCounterTrendPenalty,
+   113→    limitExpiryHours: state.adaptiveLimitExpiryHours,
+   114→    marketEntryConditions: parseJson<string[]>(state.adaptiveMarketEntryConditions, []),
+   115→    lessonsVersion: state.adaptiveLessonsVersion,
+   116→  };
+   117→}
+   118→
+   119→export async function updateAdaptiveParams(updates: Partial<AdaptiveParams>) {
+   120→  const data: Record<string, unknown> = {};
+   121→  if (updates.minSlDistancePct !== undefined) data.adaptiveMinSlDistancePct = updates.minSlDistancePct;
+   122→  if (updates.minConfidence !== undefined) data.adaptiveMinConfidence = updates.minConfidence;
+   123→  if (updates.avoidCoins !== undefined) data.adaptiveAvoidCoins = stringifyJson(updates.avoidCoins);
+   124→  if (updates.minRr !== undefined) data.adaptiveMinRr = updates.minRr;
+   125→  if (updates.counterTrendPenalty !== undefined) data.adaptiveCounterTrendPenalty = updates.counterTrendPenalty;
+   126→  if (updates.limitExpiryHours !== undefined) data.adaptiveLimitExpiryHours = updates.limitExpiryHours;
+   127→  if (updates.marketEntryConditions !== undefined) data.adaptiveMarketEntryConditions = stringifyJson(updates.marketEntryConditions);
+   128→  if (updates.lessonsVersion !== undefined) data.adaptiveLessonsVersion = updates.lessonsVersion;
+   129→
+   130→  return db.traderState.update({
+   131→    where: { id: 'singleton' },
+   132→    data: { ...data, lastUpdated: nowTs() } as any,
+   133→  });
+   134→}
+   135→
+   136→// ─── Trades ───────────────────────────────────────────────────────────────────
+   137→
+   138→export type TradeInput = {
+   139→  id: string;
+   140→  coinId: string;
+   141→  coinSymbol: string;
+   142→  direction: string;
+   143→  entryType: string;
+   144→  entry: number;
+   145→  currentPrice: number;
+   146→  stopLoss: number;
+   147→  takeProfit1?: number;
+   148→  takeProfit2?: number;
+   149→  takeProfit3?: number;
+   150→  confidence: number;
+   151→  timeframe: string;
+   152→  entryReason: string;
+   153→  reasons?: string[];
+   154→  leverage: number;
+   155→  positionSize: number;
+   156→  quantity: number;
+   157→  timestamp: number;
+   158→  entryReached?: boolean;
+   159→  enteredAt?: number | null;
+   160→  resolved?: boolean;
+   161→  result?: string | null;
+   162→  exitPrice?: number | null;
+   163→  exitReason?: string | null;
+   164→  closedAt?: number | null;
+   165→  pnlUSDT?: number | null;
+   166→  pnlPct?: number | null;
+   167→  pointsChange?: number | null;
+   168→  trailingStop?: boolean;
+   169→  trailingStopPrice?: number | null;
+   170→  trailingStepPct?: number | null;
+   171→  partialExits?: PartialExit[];
+   172→};
+   173→
+   174→export async function createTrade(trade: TradeInput) {
+   175→  return db.trade.create({
+   176→    data: {
+   177→      id: trade.id,
+   178→      coinId: trade.coinId,
+   179→      coinSymbol: trade.coinSymbol,
+   180→      direction: trade.direction,
+   181→      entryType: trade.entryType,
+   182→      entry: trade.entry,
+   183→      currentPrice: trade.currentPrice,
+   184→      stopLoss: trade.stopLoss,
+   185→      takeProfit1: trade.takeProfit1 ?? null,
+   186→      takeProfit2: trade.takeProfit2 ?? null,
+   187→      takeProfit3: trade.takeProfit3 ?? null,
+   188→      confidence: trade.confidence,
+   189→      timeframe: trade.timeframe,
+   190→      entryReason: trade.entryReason,
+   191→      reasons: stringifyJson(trade.reasons ?? []),
+   192→      leverage: trade.leverage,
+   193→      positionSize: trade.positionSize,
+   194→      quantity: trade.quantity,
+   195→      timestamp: ts(trade.timestamp)!,
+   196→      entryReached: trade.entryReached ?? false,
+   197→      enteredAt: ts(trade.enteredAt),
+   198→      resolved: trade.resolved ?? false,
+   199→      result: trade.result ?? null,
+   200→      exitPrice: trade.exitPrice ?? null,
+   201→      exitReason: trade.exitReason ?? null,
+   202→      closedAt: ts(trade.closedAt),
+   203→      pnlUSDT: trade.pnlUSDT ?? null,
+   204→      pnlPct: trade.pnlPct ?? null,
+   205→      pointsChange: trade.pointsChange ?? null,
+   206→      trailingStop: trade.trailingStop ?? false,
+   207→      trailingStopPrice: trade.trailingStopPrice ?? null,
+   208→      trailingStepPct: trade.trailingStepPct ?? null,
+   209→      partialExits: stringifyJson(trade.partialExits ?? []),
+   210→    },
+   211→  });
+   212→}
+   213→
+   214→export type TradeFilters = {
+   215→  coinId?: string;
+   216→  direction?: string;
+   217→  resolved?: boolean;
+   218→  result?: string;
+   219→  entryType?: string;
+   220→};
+   221→
+   222→export async function getTrades(filters?: TradeFilters) {
+   223→  const where: any = {};
+   224→  if (filters?.coinId) where.coinId = filters.coinId;
+   225→  if (filters?.direction) where.direction = filters.direction;
+   226→  if (filters?.resolved !== undefined) where.resolved = filters.resolved;
+   227→  if (filters?.result) where.result = filters.result;
+   228→  if (filters?.entryType) where.entryType = filters.entryType;
+   229→
+   230→  return db.trade.findMany({
+   231→    where: Object.keys(where).length > 0 ? where : undefined,
+   232→    orderBy: { timestamp: 'desc' },
+   233→  });
+   234→}
+   235→
+   236→export async function getOpenTrades() {
+   237→  return db.trade.findMany({
+   238→    where: { resolved: false },
+   239→    orderBy: { timestamp: 'desc' },
+   240→  });
+   241→}
+   242→
+   243→export async function getResolvedTrades(limit = 50, offset = 0) {
+   244→  return db.trade.findMany({
+   245→    where: { resolved: true },
+   246→    orderBy: { closedAt: 'desc' },
+   247→    take: limit,
+   248→    skip: offset,
+   249→  });
+   250→}
+   251→
+   252→export async function updateTrade(id: string, updates: Record<string, unknown>) {
+   253→  const data: Record<string, unknown> = { ...updates };
+   254→  // Convert number timestamps to BigInt
+   255→  for (const key of ['timestamp', 'enteredAt', 'closedAt']) {
+   256→    if (key in data && data[key] != null) {
+   257→      (data as any)[key] = ts(data[key] as number);
+   258→    }
+   259→  }
+   260→  if ('reasons' in updates && updates.reasons) {
+   261→    data.reasons = stringifyJson(updates.reasons);
+   262→  }
+   263→  if ('partialExits' in updates && updates.partialExits) {
+   264→    data.partialExits = stringifyJson(updates.partialExits);
+   265→  }
+   266→  return db.trade.update({ where: { id }, data: data as any });
+   267→}
+   268→
+   269→export async function deleteTrade(id: string) {
+   270→  return db.trade.delete({ where: { id } });
+   271→}
+   272→
+   273→// ─── Lessons ──────────────────────────────────────────────────────────────────
+   274→
+   275→export type LessonInput = {
+   276→  type: string;
+   277→  description: string;
+   278→  coinId?: string | null;
+   279→  direction?: string | null;
+   280→  value?: number | null;
+   281→  timestamp: number;
+   282→  tradeId?: string | null;
+   283→  severity?: string;
+   284→};
+   285→
+   286→export async function addLesson(lesson: LessonInput) {
+   287→  return db.lesson.create({
+   288→    data: {
+   289→      type: lesson.type,
+   290→      description: lesson.description,
+   291→      coinId: lesson.coinId ?? null,
+   292→      direction: lesson.direction ?? null,
+   293→      value: lesson.value ?? null,
+   294→      timestamp: ts(lesson.timestamp)!,
+   295→      tradeId: lesson.tradeId ?? null,
+   296→      severity: lesson.severity ?? 'info',
+   297→    },
+   298→  });
+   299→}
+   300→
+   301→export async function getLessons(limit = 100) {
+   302→  return db.lesson.findMany({
+   303→    orderBy: { timestamp: 'desc' },
+   304→    take: limit,
+   305→  });
+   306→}
+   307→
+   308→// ─── Thoughts ─────────────────────────────────────────────────────────────────
+   309→
+   310→export type ThoughtInput = {
+   311→  id: string;
+   312→  timestamp: number;
+   313→  type: string;
+   314→  title: string;
+   315→  detail: string;
+   316→  coinSymbol?: string | null;
+   317→  coinId?: string | null;
+   318→  direction?: string | null;
+   319→  confidence?: number | null;
+   320→  score?: number | null;
+   321→  tradeId?: string | null;
+   322→  pnl?: number | null;
+   323→  entryType?: string | null;
+   324→  emotion?: string;
+   325→  tags?: string[];
+   326→};
+   327→
+   328→export async function addThought(thought: ThoughtInput) {
+   329→  return db.thought.create({
+   330→    data: {
+   331→      id: thought.id,
+   332→      timestamp: ts(thought.timestamp)!,
+   333→      type: thought.type,
+   334→      title: thought.title,
+   335→      detail: thought.detail,
+   336→      coinSymbol: thought.coinSymbol ?? null,
+   337→      coinId: thought.coinId ?? null,
+   338→      direction: thought.direction ?? null,
+   339→      confidence: thought.confidence ?? null,
+   340→      score: thought.score ?? null,
+   341→      tradeId: thought.tradeId ?? null,
+   342→      pnl: thought.pnl ?? null,
+   343→      entryType: thought.entryType ?? null,
+   344→      emotion: thought.emotion ?? 'neutral',
+   345→      tags: stringifyJson(thought.tags ?? []),
+   346→    },
+   347→  });
+   348→}
+   349→
+   350→export async function getThoughts(limit = 50, offset = 0) {
+   351→  return db.thought.findMany({
+   352→    orderBy: { timestamp: 'desc' },
+   353→    take: limit,
+   354→    skip: offset,
+   355→  });
+   356→}
+   357→
+   358→// ─── Audit Log ────────────────────────────────────────────────────────────────
+   359→
+   360→export async function addAuditLog(
+   361→  action: string,
+   362→  details: Record<string, unknown>,
+   363→  coinId?: string | null,
+   364→  tradeId?: string | null,
+   365→) {
+   366→  return db.tradeAuditLog.create({
+   367→    data: {
+   368→      timestamp: nowTs(),
+   369→      action,
+   370→      details: stringifyJson(details),
+   371→      coinId: coinId ?? null,
+   372→      tradeId: tradeId ?? null,
+   373→    },
+   374→  });
+   375→}
+   376→
+   377→export async function getAuditLogs(limit = 100, offset = 0) {
+   378→  return db.tradeAuditLog.findMany({
+   379→    orderBy: { timestamp: 'desc' },
+   380→    take: limit,
+   381→    skip: offset,
+   382→  });
+   383→}
+   384→
+   385→// ─── Deposit Snapshots ────────────────────────────────────────────────────────
+   386→
+   387→export async function addDepositSnapshot(snapshot: { timestamp: number; balance: number; equity: number }) {
+   388→  return db.depositSnapshot.create({
+   389→    data: {
+   390→      timestamp: ts(snapshot.timestamp)!,
+   391→      balance: snapshot.balance,
+   392→      equity: snapshot.equity,
+   393→    },
+   394→  });
+   395→}
+   396→
+   397→export async function getDepositSnapshots() {
+   398→  return db.depositSnapshot.findMany({
+   399→    orderBy: { timestamp: 'asc' },
+   400→  });
+   401→}
+   402→
+   403→// ─── Debt Entries ─────────────────────────────────────────────────────────────
+   404→
+   405→export async function addDebtEntry(entry: { timestamp: number; amount: number; remainingOwed: number; label?: string }) {
+   406→  return db.debtEntry.create({
+   407→    data: {
+   408→      timestamp: ts(entry.timestamp)!,
+   409→      amount: entry.amount,
+   410→      remainingOwed: entry.remainingOwed,
+   411→      label: entry.label ?? '',
+   412→    },
+   413→  });
+   414→}
+   415→
+   416→export async function getDebtEntries() {
+   417→  return db.debtEntry.findMany({
+   418→    orderBy: { timestamp: 'desc' },
+   419→  });
+   420→}
+   421→
+   422→// ─── Trading Stats ────────────────────────────────────────────────────────────
+   423→
+   424→export async function getTradingStats(): Promise<TradingStats> {
+   425→  const state = await getTraderState();
+   426→  const resolvedTrades = await db.trade.findMany({
+   427→    where: { resolved: true, pnlUSDT: { not: null } },
+   428→    orderBy: { closedAt: 'asc' },
+   429→  });
+   430→
+   431→  const wins = resolvedTrades.filter(t => t.result === 'WIN' && t.pnlUSDT !== null);
+   432→  const losses = resolvedTrades.filter(t => t.result === 'LOSS' && t.pnlUSDT !== null);
+   433→
+   434→  const totalWins = wins.length;
+   435→  const totalLosses = losses.length;
+   436→  const totalPnl = state.totalPnl;
+   437→  const totalTrades = resolvedTrades.length;
+   438→
+   439→  const winRate = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 0;
+   440→
+   441→  const winPnls = wins.map(t => t.pnlUSDT!);
+   442→  const lossPnls = losses.map(t => t.pnlUSDT!);
+   443→
+   444→  const avgWin = winPnls.length > 0 ? winPnls.reduce((a, b) => a + b, 0) / winPnls.length : 0;
+   445→  const avgLoss = lossPnls.length > 0 ? lossPnls.reduce((a, b) => a + b, 0) / lossPnls.length : 0;
+   446→
+   447→  const avgPnl = totalTrades > 0 ? totalPnl / totalTrades : 0;
+   448→
+   449→  // Profit factor: gross profits / gross losses (absolute)
+   450→  const grossProfit = winPnls.reduce((a, b) => a + b, 0);
+   451→  const grossLoss = Math.abs(lossPnls.reduce((a, b) => a + b, 0));
+   452→  const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
+   453→
+   454→  // Expectancy: (winRate% * avgWin) - (lossRate% * |avgLoss|)
+   455→  const lossRate = totalTrades > 0 ? (totalLosses / totalTrades) : 0;
+   456→  const expectancy = (winRate / 100 * avgWin) - (lossRate * Math.abs(avgLoss));
+   457→
+   458→  // Max drawdown from deposit snapshots
+   459→  const snapshots = await db.depositSnapshot.findMany({ orderBy: { timestamp: 'asc' } });
+   460→  let maxDrawdown = 0;
+   461→  let peak = 0;
+   462→  for (const snap of snapshots) {
+   463→    if (snap.equity > peak) peak = snap.equity;
+   464→    const dd = peak > 0 ? ((peak - snap.equity) / peak) * 100 : 0;
+   465→    if (dd > maxDrawdown) maxDrawdown = dd;
+   466→  }
+   467→
+   468→  // Sharpe ratio (annualized, assuming ~6 trades/day, 365 days)
+   469→  const allPnls = resolvedTrades.map(t => t.pnlUSDT ?? 0);
+   470→  const sharpeRatio = computeSharpe(allPnls, 2190); // ~6 * 365
+   471→
+   472→  // Sortino ratio
+   473→  const sortinoRatio = computeSortino(allPnls, 2190);
+   474→
+   475→  // Calmar ratio: annualized return / max drawdown
+   476→  const annualizedReturn = totalTrades > 0 ? (totalPnl / state.initialDeposit) * (2190 / Math.max(totalTrades, 1)) * 100 : 0;
+   477→  const calmarRatio = maxDrawdown > 0 ? annualizedReturn / maxDrawdown : 0;
+   478→
+   479→  // Consecutive wins/losses streaks
+   480→  let consecutiveWins = 0;
+   481→  let consecutiveLosses = 0;
+   482→  let currentWinStreak = 0;
+   483→  let currentLossStreak = 0;
+   484→  for (const t of resolvedTrades) {
+   485→    if (t.result === 'WIN') {
+   486→      currentWinStreak++;
+   487→      currentLossStreak = 0;
+   488→      if (currentWinStreak > consecutiveWins) consecutiveWins = currentWinStreak;
+   489→    } else if (t.result === 'LOSS') {
+   490→      currentLossStreak++;
+   491→      currentWinStreak = 0;
+   492→      if (currentLossStreak > consecutiveLosses) consecutiveLosses = currentLossStreak;
+   493→    } else {
+   494→      currentWinStreak = 0;
+   495→      currentLossStreak = 0;
+   496→    }
+   497→  }
+   498→
+   499→  return {
+   500→    totalTrades,
+   501→    wins: totalWins,
+   502→    losses: totalLosses,
+   503→    expired: state.expired,
+   504→    winRate,
+   505→    avgPnl,
+   506→    totalPnl,
+   507→    bestTrade: state.bestTrade,
+   508→    worstTrade: state.worstTrade,
+   509→    profitFactor,
+   510→    sharpeRatio,
+   511→    sortinoRatio,
+   512→    maxDrawdown,
+   513→    calmarRatio,
+   514→    avgWin,
+   515→    avgLoss,
+   516→    expectancy,
+   517→    consecutiveWins,
+   518→    consecutiveLosses,
+   519→  };
+   520→}
+   521→
+   522→function computeSharpe(returns: number[], periodsPerYear: number): number {
+   523→  if (returns.length < 2) return 0;
+   524→  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+   525→  const variance = returns.reduce((acc, r) => acc + Math.pow(r - mean, 2), 0) / (returns.length - 1);
+   526→  const stdDev = Math.sqrt(variance);
+   527→  if (stdDev === 0) return 0;
+   528→  return (mean / stdDev) * Math.sqrt(periodsPerYear);
+   529→}
+   530→
+   531→function computeSortino(returns: number[], periodsPerYear: number): number {
+   532→  if (returns.length < 2) return 0;
+   533→  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+   534→  const downsideVariance = returns
+   535→    .filter(r => r < 0)
+   536→    .reduce((acc, r) => acc + Math.pow(r, 2), 0) / returns.length;
+   537→  const downsideDev = Math.sqrt(downsideVariance);
+   538→  if (downsideDev === 0) return 0;
+   539→  return (mean / downsideDev) * Math.sqrt(periodsPerYear);
+   540→}
+   541→
+   542→// ─── Migration from JSON ──────────────────────────────────────────────────────
+   543→
+   544→interface JsonTraderData {
+   545→  initialDeposit: number;
+   546→  balance: number;
+   547→  totalTrades: number;
+   548→  wins: number;
+   549→  losses: number;
+   550→  expired: number;
+   551→  score: number;
+   552→  winRate: number;
+   553→  avgPnl: number;
+   554→  streak: number;
+   555→  bestTrade: number;
+   556→  worstTrade: number;
+   557→  totalPnl: number;
+   558→  level: string;
+   559→  levelEmoji: string;
+   560→  riskPerTrade: number;
+   561→  defaultLeverage: number;
+   562→  trades?: any[];
+   563→  depositHistory?: any[];
+   564→  lastUpdated: number;
+   565→  totalDebt: number;
+   566→  debtHistory?: any[];
+   567→  totalRepaid: number;
+   568→  adaptive?: {
+   569→    minSlDistancePct: number;
+   570→    minConfidence: number;
+   571→    avoidCoins: string[];
+   572→    minRr: number;
+   573→    counterTrendPenalty: number;
+   574→    limitExpiryHours: number;
+   575→    marketEntryConditions: string[];
+   576→    lessons: any[];
+   577→    lessonsVersion: number;
+   578→  };
+   579→}
+   580→
+   581→interface JsonThoughtData {
+   582→  thoughts?: any[];
+   583→  currentMood?: string;
+   584→  activeStrategy?: string;
+   585→  marketView?: string;
+   586→  lastScanAt?: number;
+   587→  openPositionsCount?: number;
+   588→  freeBalance?: number;
+   589→  totalEquity?: number;
+   590→}
+   591→
+   592→export async function migrateFromJson() {
+   593→  const fs = await import('fs');
+   594→  const path = await import('path');
+   595→  let migrated = { trades: 0, thoughts: 0, snapshots: 0, debts: 0, lessons: 0, state: false };
+   596→
+   597→  // Check if trader-data.json exists
+   598→  const traderDataPath = path.join(process.cwd(), 'trader-data.json');
+   599→  if (!fs.existsSync(traderDataPath)) {
+   600→    console.log('[migrateFromJson] trader-data.json not found, skipping.');
+   601→    return migrated;
+   602→  }
+   603→
+   604→  const traderData: JsonTraderData = JSON.parse(fs.readFileSync(traderDataPath, 'utf-8'));
+   605→
+   606→  // Check if already migrated (simple check: if TraderState exists and has trades count matching)
+   607→  const existingState = await db.traderState.findUnique({ where: { id: 'singleton' } });
+   608→  if (existingState && existingState.totalTrades > 0) {
+   609→    console.log('[migrateFromJson] Already migrated, skipping.');
+   610→    return migrated;
+   611→  }
+   612→
+   613→  // Migrate TraderState
+   614→  await db.traderState.upsert({
+   615→    where: { id: 'singleton' },
+   616→    update: {
+   617→      initialDeposit: traderData.initialDeposit,
+   618→      balance: traderData.balance,
+   619→      totalTrades: traderData.totalTrades,
+   620→      wins: traderData.wins,
+   621→      losses: traderData.losses,
+   622→      expired: traderData.expired,
+   623→      score: traderData.score,
+   624→      winRate: traderData.winRate,
+   625→      avgPnl: traderData.avgPnl,
+   626→      streak: traderData.streak,
+   627→      bestTrade: traderData.bestTrade,
+   628→      worstTrade: traderData.worstTrade,
+   629→      totalPnl: traderData.totalPnl,
+   630→      level: traderData.level,
+   631→      levelEmoji: traderData.levelEmoji,
+   632→      riskPerTrade: traderData.riskPerTrade,
+   633→      defaultLeverage: traderData.defaultLeverage,
+   634→      totalDebt: traderData.totalDebt ?? 0,
+   635→      totalRepaid: traderData.totalRepaid ?? 0,
+   636→      lastUpdated: ts(traderData.lastUpdated ?? 0)!,
+   637→      adaptiveMinSlDistancePct: traderData.adaptive?.minSlDistancePct ?? 1,
+   638→      adaptiveMinConfidence: traderData.adaptive?.minConfidence ?? 60,
+   639→      adaptiveAvoidCoins: stringifyJson(traderData.adaptive?.avoidCoins ?? []),
+   640→      adaptiveMinRr: traderData.adaptive?.minRr ?? 1.5,
+   641→      adaptiveCounterTrendPenalty: traderData.adaptive?.counterTrendPenalty ?? 0.1,
+   642→      adaptiveLimitExpiryHours: traderData.adaptive?.limitExpiryHours ?? 2,
+   643→      adaptiveMarketEntryConditions: stringifyJson(traderData.adaptive?.marketEntryConditions ?? []),
+   644→      adaptiveLessonsVersion: traderData.adaptive?.lessonsVersion ?? 0,
+   645→    },
+   646→    create: {
+   647→      id: 'singleton',
+   648→      initialDeposit: traderData.initialDeposit,
+   649→      balance: traderData.balance,
+   650→      totalTrades: traderData.totalTrades,
+   651→      wins: traderData.wins,
+   652→      losses: traderData.losses,
+   653→      expired: traderData.expired,
+   654→      score: traderData.score,
+   655→      winRate: traderData.winRate,
+   656→      avgPnl: traderData.avgPnl,
+   657→      streak: traderData.streak,
+   658→      bestTrade: traderData.bestTrade,
+   659→      worstTrade: traderData.worstTrade,
+   660→      totalPnl: traderData.totalPnl,
+   661→      level: traderData.level,
+   662→      levelEmoji: traderData.levelEmoji,
+   663→      riskPerTrade: traderData.riskPerTrade,
+   664→      defaultLeverage: traderData.defaultLeverage,
+   665→      totalDebt: traderData.totalDebt ?? 0,
+   666→      totalRepaid: traderData.totalRepaid ?? 0,
+   667→      lastUpdated: ts(traderData.lastUpdated ?? 0)!,
+   668→      // Adaptive
+   669→      adaptiveMinSlDistancePct: traderData.adaptive?.minSlDistancePct ?? 1,
+   670→      adaptiveMinConfidence: traderData.adaptive?.minConfidence ?? 60,
+   671→      adaptiveAvoidCoins: stringifyJson(traderData.adaptive?.avoidCoins ?? []),
+   672→      adaptiveMinRr: traderData.adaptive?.minRr ?? 1.5,
+   673→      adaptiveCounterTrendPenalty: traderData.adaptive?.counterTrendPenalty ?? 0.1,
+   674→      adaptiveLimitExpiryHours: traderData.adaptive?.limitExpiryHours ?? 2,
+   675→      adaptiveMarketEntryConditions: stringifyJson(traderData.adaptive?.marketEntryConditions ?? []),
+   676→      adaptiveLessonsVersion: traderData.adaptive?.lessonsVersion ?? 0,
+   677→    },
+   678→  });
+   679→  migrated.state = true;
+   680→
+   681→  // Migrate Trades
+   682→  if (traderData.trades && Array.isArray(traderData.trades)) {
+   683→    for (const t of traderData.trades) {
+   684→      try {
+   685→        await db.trade.create({
+   686→          data: {
+   687→            id: t.id,
+   688→            coinId: t.coinId,
+   689→            coinSymbol: t.coinSymbol,
+   690→            direction: t.direction,
+   691→            entryType: t.entryType,
+   692→            entry: t.entry,
+   693→            currentPrice: t.currentPrice,
+   694→            stopLoss: t.stopLoss,
+   695→            takeProfit1: t.takeProfit1 ?? null,
+   696→            takeProfit2: t.takeProfit2 ?? null,
+   697→            takeProfit3: t.takeProfit3 ?? null,
+   698→            confidence: t.confidence,
+   699→            timeframe: t.timeframe,
+   700→            entryReason: t.entryReason,
+   701→            reasons: stringifyJson(t.reasons ?? []),
+   702→            leverage: t.leverage,
+   703→            positionSize: t.positionSize,
+   704→            quantity: t.quantity,
+   705→            timestamp: ts(t.timestamp)!,
+   706→            entryReached: t.entryReached ?? false,
+   707→            enteredAt: ts(t.enteredAt),
+   708→            resolved: t.resolved ?? false,
+   709→            result: t.result ?? null,
+   710→            exitPrice: t.exitPrice ?? null,
+   711→            exitReason: t.exitReason ?? null,
+   712→            closedAt: ts(t.closedAt),
+   713→            pnlUSDT: t.pnlUSDT ?? null,
+   714→            pnlPct: t.pnlPct ?? null,
+   715→            pointsChange: t.pointsChange ?? null,
+   716→            trailingStop: t.trailingStop ?? false,
+   717→            trailingStopPrice: t.trailingStopPrice ?? null,
+   718→            trailingStepPct: t.trailingStepPct ?? null,
+   719→            partialExits: stringifyJson(t.partialExits ?? []),
+   720→          },
+   721→        });
+   722→        migrated.trades++;
+   723→      } catch (e: any) {
+   724→        if (e?.code !== 'P2002') console.error(`[migrateFromJson] Trade ${t.id} error:`, e.message);
+   725→      }
+   726→    }
+   727→  }
+   728→
+   729→  // Migrate Deposit Snapshots
+   730→  if (traderData.depositHistory && Array.isArray(traderData.depositHistory)) {
+   731→    for (const snap of traderData.depositHistory) {
+   732→      await db.depositSnapshot.create({
+   733→        data: {
+   734→          timestamp: ts(snap.timestamp)!,
+   735→          balance: snap.balance,
+   736→          equity: snap.equity,
+   737→        },
+   738→      });
+   739→      migrated.snapshots++;
+   740→    }
+   741→  }
+   742→
+   743→  // Migrate Debt Entries
+   744→  if (traderData.debtHistory && Array.isArray(traderData.debtHistory)) {
+   745→    for (const d of traderData.debtHistory) {
+   746→      await db.debtEntry.create({
+   747→        data: {
+   748→          timestamp: ts(d.timestamp)!,
+   749→          amount: d.amount,
+   750→          remainingOwed: d.remainingOwed ?? d.amount,
+   751→          label: d.label ?? '',
+   752→        },
+   753→      });
+   754→      migrated.debts++;
+   755→    }
+   756→  }
+   757→
+   758→  // Migrate lessons from adaptive
+   759→  if (traderData.adaptive?.lessons && Array.isArray(traderData.adaptive.lessons)) {
+   760→    for (const l of traderData.adaptive.lessons) {
+   761→      await db.lesson.create({
+   762→        data: {
+   763→          type: l.type ?? 'general',
+   764→          description: l.description ?? '',
+   765→          coinId: l.coinId ?? null,
+   766→          direction: l.direction ?? null,
+   767→          value: l.value ?? null,
+   768→          timestamp: ts(l.timestamp) ?? nowTs(),
+   769→          tradeId: l.tradeId ?? null,
+   770→          severity: l.severity ?? 'info',
+   771→        },
+   772→      });
+   773→      migrated.lessons++;
+   774→    }
+   775→  }
+   776→
+   777→  // Migrate thoughts from trader-thinking.json
+   778→  const thoughtDataPath = path.join(process.cwd(), 'trader-thinking.json');
+   779→  if (fs.existsSync(thoughtDataPath)) {
+   780→    const thoughtData: JsonThoughtData = JSON.parse(fs.readFileSync(thoughtDataPath, 'utf-8'));
+   781→    if (thoughtData.thoughts && Array.isArray(thoughtData.thoughts)) {
+   782→      for (const t of thoughtData.thoughts) {
+   783→        try {
+   784→          await db.thought.create({
+   785→            data: {
+   786→              id: t.id,
+   787→              timestamp: ts(t.timestamp)!,
+   788→              type: t.type,
+   789→              title: t.title,
+   790→              detail: t.detail,
+   791→              coinSymbol: t.coinSymbol ?? null,
+   792→              coinId: t.coinId ?? null,
+   793→              direction: t.direction ?? null,
+   794→              confidence: t.confidence ?? null,
+   795→              score: t.score ?? null,
+   796→              tradeId: t.tradeId ?? null,
+   797→              pnl: t.pnl ?? null,
+   798→              entryType: t.entryType ?? null,
+   799→              emotion: t.emotion ?? 'neutral',
+   800→              tags: stringifyJson(t.tags ?? []),
+   801→            },
+   802→          });
+   803→          migrated.thoughts++;
+   804→        } catch (e: any) {
+   805→          if (e?.code !== 'P2002') console.error(`[migrateFromJson] Thought ${t.id} error:`, e.message);
+   806→        }
+   807→      }
+   808→    }
+   809→  }
+   810→
+   811→  console.log(`[migrateFromJson] Migration complete:`, migrated);
+   812→  return migrated;
+   813→}
