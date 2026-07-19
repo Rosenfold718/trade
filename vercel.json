@@ -1,6 +1,5 @@
 {
   "framework": "nextjs",
-  "buildCommand": "npm run build",
-  "installCommand": "npm install --no-package-lock",
-  "outputDirectory": ".next"
+  "buildCommand": "npx next build",
+  "installCommand": "npm install"
 }
