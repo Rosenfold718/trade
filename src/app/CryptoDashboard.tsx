@@ -196,24 +196,28 @@ export default function CryptoDashboard() {
     abortRef.current = new AbortController();
     setChartLoading(true);
     const url = `/api/crypto/signals?coin=${selectedCoin}&interval=${interval}`;
-    for (let retry = 0; retry < 3; retry++) {
-      try {
-        const ctrl = retry === 0 ? abortRef.current.signal : AbortSignal.timeout(8000);
-        const res = await fetch(url, { signal: ctrl });
-        if (res.ok) {
-          const json = await res.json();
-          setChartData(json.chartData || []);
-          setSignal(json.signal || null);
-          setTradeSignal(json.tradeSignal || null);
-          setApiSource(json.source || apiSource);
-          return;
+    try {
+      for (let retry = 0; retry < 3; retry++) {
+        try {
+          const ctrl = retry === 0 ? abortRef.current.signal : AbortSignal.timeout(8000);
+          const res = await fetch(url, { signal: ctrl });
+          if (res.ok) {
+            const json = await res.json();
+            setChartData(json.chartData || []);
+            setSignal(json.signal || null);
+            setTradeSignal(json.tradeSignal || null);
+            setApiSource(json.source || apiSource);
+            return;
+          }
+        } catch (e: any) {
+          if (e.name === 'AbortError' && retry === 0) return; // user changed coin
         }
-      } catch (e: any) {
-        if (e.name === 'AbortError' && retry === 0) return; // user changed coin
+        if (retry < 2) await new Promise(r => setTimeout(r, 1500));
       }
-      if (retry < 2) await new Promise(r => setTimeout(r, 1500));
+      setChartData([]); setSignal({ type: 'HOLD', strength: 0, indicators: [], summary: 'Данные недоступны. Попробуйте обновить.' }); setTradeSignal(null);
+    } finally {
+      setChartLoading(false);
     }
-    setChartData([]); setSignal({ type: 'HOLD', strength: 0, indicators: [], summary: 'Данные недоступны. Попробуйте обновить.' }); setTradeSignal(null);
   }, [selectedCoin, interval, apiSource]);
 
   const fetchSentiment = useCallback(async () => {

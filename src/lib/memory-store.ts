@@ -12,9 +12,11 @@ export async function storeRead(filePath: string): Promise<string | null> {
       return await readFile(filePath, 'utf-8');
     }
   } catch (e: any) {
-    if (e?.code !== 'ENOENT' && e?.code !== 'EROFS' && e?.code !== 'EACCES') {
-      console.warn(`[memory-store] FS read error: ${e.code}`);
+    const code = e?.code;
+    if (code && code !== 'ENOENT' && code !== 'EROFS' && code !== 'EACCES') {
+      console.warn(`[memory-store] FS read error: ${code}`);
     }
+    // code=undefined means the import itself failed or non-FS error — expected on Vercel
   }
   // Fallback to memory
   return store.get(filePath) ?? null;
