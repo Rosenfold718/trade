@@ -67,7 +67,7 @@ function hourlyToOHLCV(prices: number[][], volumes: number[][]): OHLCV[] {
 // Fetch OHLCV from multiple sources with fallback
 // CRITICAL: Bybit first (Binance geo-blocked on Vercel → 451)
 async function fetchOHLCV(coinId: string, interval: string, limit: number): Promise<{ data: OHLCV[]; source: string }> {
-  const timeoutMs = 5000;
+  const timeoutMs = 10000;
 
   // Determine proper CoinGecko days based on interval
   const cgDays: Record<string, number> = { '1m': 1, '5m': 1, '15m': 1, '1h': 7, '4h': 30 };
@@ -80,6 +80,7 @@ async function fetchOHLCV(coinId: string, interval: string, limit: number): Prom
       const symbol = bybitSymbol + 'USDT';
       const bybitInterval = getBybitInterval(interval);
       const bybitLimit = Math.min(limit, 200);
+      console.log(`[signals] trying bybit ${symbol} interval=${bybitInterval} limit=${bybitLimit}`);
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), timeoutMs);
       const response = await fetch(
@@ -90,6 +91,7 @@ async function fetchOHLCV(coinId: string, interval: string, limit: number): Prom
       if (response.ok) {
         const data = await response.json();
         if (data.retCode === 0 && data.result?.list?.length > 0) {
+          console.log(`[signals] bybit OK, ${data.result.list.length} klines`);
           const klines = [...data.result.list].reverse();
           const ohlcv = klines.map((k: string[]) => ({
             timestamp: parseFloat(k[0]), open: parseFloat(k[1]), high: parseFloat(k[2]),
@@ -98,7 +100,7 @@ async function fetchOHLCV(coinId: string, interval: string, limit: number): Prom
           return { data: ohlcv, source: 'bybit' };
         }
       }
-    } catch { /* try next */ }
+    } catch (e: any) { console.log('[signals] bybit err:', e?.message || e); }
   }
 
   // Strategy 2: Binance (fallback — may 451 from US)
@@ -123,10 +125,11 @@ async function fetchOHLCV(coinId: string, interval: string, limit: number): Prom
           return { data: ohlcv, source: 'binance' };
         }
       }
-    } catch { /* try next */ }
+    } catch (e: any) { console.log('[signals] binance err:', e?.message || e); }
   }
 
   // Strategy 3: CoinGecko OHLCV
+  console.log('[signals] trying coingecko ohlcv...');
   try {
     const ctrl3 = new AbortController();
     const timer3 = setTimeout(() => ctrl3.abort(), timeoutMs);
@@ -192,6 +195,8 @@ function cleanCache() {
   }
 }
 
+export const maxDuration = 30;
+
 export async function GET(request: Request) {
   const clientIp = request.headers.get('x-forwarded-for') || 'unknown';
   const { allowed, remaining, resetAt } = rateLimit(`api:signals:${clientIp}`, RATE_LIMITS.signals);
@@ -210,8 +215,11 @@ export async function GET(request: Request) {
     const cacheKey = `${id}-${interval}-${days}`;
     const cached = cache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      console.log(`[signals] cache hit ${cacheKey}`);
       return NextResponse.json(cached.data, { headers: { 'X-RateLimit-Remaining': String(remaining) } });
     }
+
+    console.log(`[signals] fetching ${id} ${interval}...`);
 
     // Determine candle limits based on interval
     let limit: number;

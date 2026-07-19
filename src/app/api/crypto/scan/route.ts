@@ -10,6 +10,8 @@ const CACHE_TTL = 45000; // 45s — match scan cycle
 let scanCache: { data: any; timestamp: number } | null = null;
 
 // Scan all top coins and find the best entry opportunity
+export const maxDuration = 60;
+
 export async function GET(request: Request) {
   const clientIp = request.headers.get('x-forwarded-for') || 'unknown';
   const { allowed, remaining, resetAt } = rateLimit(`api:scan:${clientIp}`, RATE_LIMITS.scan);

@@ -59,7 +59,7 @@ export async function GET(request: Request) {
       const bybitSymbol = symbol + 'USDT';
       const bybitInterval = getBybitInterval(d);
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 5000);
+      const timer = setTimeout(() => ctrl.abort(), 10000);
       const bybitResponse = await fetch(
         `${BYBIT_BASE}/kline?category=spot&symbol=${bybitSymbol}&interval=${bybitInterval}&limit=${Math.min(limit, 200)}`,
         { cache: 'no-store', signal: ctrl.signal }
@@ -83,7 +83,7 @@ export async function GET(request: Request) {
       const binanceSymbol = symbol + 'USDT';
       const url = `${BINANCE_BASE}/klines?symbol=${binanceSymbol}&interval=${interval}&limit=${limit}`;
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 5000);
+      const timer = setTimeout(() => ctrl.abort(), 10000);
       const response = await fetch(url, { cache: 'no-store', signal: ctrl.signal });
       clearTimeout(timer);
       if (response.ok) {
