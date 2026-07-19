@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 
 // Trading components
 import { CandlestickChart } from '@/components/trading/CandlestickChart';
+import { TradingViewWidget } from '@/components/trading/TradingViewWidget';
 import { CoinList } from '@/components/trading/CoinList';
 import { SignalPanel } from '@/components/trading/SignalPanel';
 import { TradeTerminalModal } from '@/components/trading/TradeTerminalModal';
@@ -119,6 +120,7 @@ export default function CryptoDashboard() {
   const [loading, setLoading] = useState(true);
   const [chartLoading, setChartLoading] = useState(false);
   const [interval, setInterval_] = useState('1h');
+  const [useTradingView, setUseTradingView] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [apiSource, setApiSource] = useState('');
   const [lastUpdate, setLastUpdate] = useState(Date.now());
@@ -608,15 +610,23 @@ export default function CryptoDashboard() {
                   <button key={tf.v} onClick={() => setInterval_(tf.v)} className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${interval === tf.v ? 'bg-primary text-primary-foreground' : 'hover:bg-accent text-muted-foreground'}`}>{tf.l}</button>
                 ))}
               </div>
+              <button onClick={() => setUseTradingView(!useTradingView)} className={`px-2 py-1 text-[11px] rounded-md border transition-colors ${useTradingView ? 'bg-orange-500 text-white border-orange-500' : 'border-border hover:bg-accent'}`}><TrendingUp className="w-3 h-3 inline mr-1" />ТрейдингВью</button>
               <button onClick={() => setShowIndicators(!showIndicators)} className={`px-2 py-1 text-[11px] rounded-md border transition-colors ${showIndicators ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:bg-accent'}`}><LineChart className="w-3 h-3 inline mr-1" />Индикаторы</button>
               <button onClick={togglePositionTool} className={`px-2 py-1 text-[11px] rounded-md border transition-colors ${positionTool.enabled ? 'bg-blue-500 text-white border-blue-500' : 'border-border hover:bg-accent'}`}><Crosshair className="w-3 h-3 inline mr-1" />Позиция</button>
               <button onClick={() => fetchAdvisor()} className={`px-2 py-1 text-[11px] rounded-md border transition-colors ${advisorVisible ? 'bg-purple-500 text-white border-purple-500' : 'border-border hover:bg-accent'}`}><Brain className="w-3 h-3 inline mr-1" />AI Советчик</button>
             </div>
 
-            {/* Chart — TradingView */}
+            {/* Chart */}
             <Card><CardContent className="p-2 sm:p-3">
               {chartLoading ? (
                 <div className="h-[480px] flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-emerald-500" /><span className="ml-3 text-sm text-muted-foreground">Загрузка...</span></div>
+              ) : useTradingView ? (
+                <TradingViewWidget
+                  coinId={selectedCoin}
+                  symbol={(selectedCoinData?.symbol || selectedCoin).toUpperCase()}
+                  interval={interval}
+                  height={480}
+                />
               ) : chartData.length > 0 ? (
                 <CandlestickChart data={chartData} tradeSignal={chartTradeSignal} height={480} showIndicators={showIndicators} />
               ) : (
