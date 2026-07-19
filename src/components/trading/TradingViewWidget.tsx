@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useRef, useMemo, useState } from 'react';
 
 // ─── Coin ID → TradingView symbol mapping (Binance pairs) ───
 
@@ -81,52 +81,126 @@ interface TradingViewWidgetProps {
 }
 
 export function TradingViewWidget({ coinId, interval, height = 480 }: TradingViewWidgetProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const tvSymbol = useMemo(() => getTVSymbol(coinId), [coinId]);
   const tvInterval = useMemo(() => getTVInterval(interval), [interval]);
+  const [useIframe, setUseIframe] = useState(false);
 
-  // Stable key forces iframe remount when coin/interval changes
-  const stableKey = useMemo(() => `${coinId}-${interval}`, [coinId, interval]);
+  // ─── Approach 1: Script-based TradingView Advanced Chart Widget ───
+  useEffect(() => {
+    if (useIframe) return; // Skip if falling back to iframe
+    if (!containerRef.current) return;
 
-  const src = useMemo(() => {
-    const widgetId = `tv_${stableKey}`;
-    const params = new URLSearchParams({
-      frameElementId: widgetId,
+    // Clear previous widget
+    containerRef.current.innerHTML = '';
+
+    // Create the widget container structure that TradingView expects
+    const wrapper = document.createElement('div');
+    wrapper.className = 'tradingview-widget-container';
+    wrapper.style.height = '100%';
+    wrapper.style.width = '100%';
+
+    const widgetDiv = document.createElement('div');
+    widgetDiv.className = 'tradingview-widget-container__widget';
+    widgetDiv.style.height = '100%';
+    widgetDiv.style.width = '100%';
+
+    wrapper.appendChild(widgetDiv);
+    containerRef.current.appendChild(wrapper);
+
+    // Create the script element with config
+    const script = document.createElement('script');
+    script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+    script.type = 'text/javascript';
+    script.async = true;
+
+    const config = {
+      autosize: true,
       symbol: tvSymbol,
       interval: tvInterval,
-      hidesidetoolbar: '0',
-      symboledit: '1',
-      saveimage: '1',
-      toolbarbg: '0f172a',
-      studies: '[%22RSI%40tv-basicstudies%22%2C%22MACD%40tv-basicstudies%22]',
+      timezone: 'Etc/UTC',
       theme: 'dark',
       style: '1',
-      timezone: 'exchange',
-      withdateranges: '1',
-      showpopupbutton: '0',
-      studies_overrides: '{}',
-      overrides: '{}',
-      enabled_features: '["study_templates"]',
-      disabled_features: '["header_symbol_search","symbol_search_hot_key"]',
       locale: 'ru',
+      allow_symbol_change: true,
+      calendar: false,
+      hide_top_toolbar: false,
+      hide_legend: false,
+      save_image: true,
+      studies: ['RSI@tv-basicstudies', 'MACD@tv-basicstudies'],
+      backgroundColor: 'rgba(15, 23, 42, 1)',
+      gridColor: 'rgba(255, 255, 255, 0.04)',
+      hide_side_toolbar: false,
+      toolbar_bg: '#0f172a',
+      enable_publishing: false,
+      withdateranges: true,
+      details: false,
+      hotlist: false,
+      show_popup_button: false,
+    };
+
+    script.textContent = JSON.stringify(config);
+    widgetDiv.appendChild(script);
+
+    // Fallback: if script doesn't load in 8s, switch to iframe
+    const fallbackTimer = setTimeout(() => {
+      console.warn('[TradingViewWidget] Script approach timed out, switching to iframe fallback');
+      setUseIframe(true);
+    }, 8000);
+
+    // Detect script load error
+    script.onerror = () => {
+      console.warn('[TradingViewWidget] Script failed to load, switching to iframe');
+      clearTimeout(fallbackTimer);
+      setUseIframe(true);
+    };
+
+    return () => {
+      clearTimeout(fallbackTimer);
+      if (containerRef.current) {
+        containerRef.current.innerHTML = '';
+      }
+    };
+  }, [tvSymbol, tvInterval, useIframe]);
+
+  // ─── Approach 2: iframe fallback ───
+  const iframeSrc = useMemo(() => {
+    const params = new URLSearchParams({
+      symbol: tvSymbol,
+      interval: tvInterval,
+      theme: 'dark',
+      style: '1',
+      locale: 'ru',
+      toolbar_bg: '0f172a',
+      enable_publishing: 'false',
+      hide_top_toolbar: 'false',
+      hide_legend: 'false',
+      withdateranges: 'true',
+      save_image: 'true',
+      studies: '[%22RSI%40tv-basicstudies%22%2C%22MACD%40tv-basicstudies%22]',
     });
-    return `https://s.tradingview.com/widgetembed/?${params.toString()}`;
-  }, [tvSymbol, tvInterval, stableKey]);
+    return `https://s.tradingview.com/widgetembed/?frameElementId=tv&${params.toString()}`;
+  }, [tvSymbol, tvInterval]);
 
   return (
     <div
-      className="relative w-full rounded-lg overflow-hidden"
+      ref={containerRef}
+      className="relative w-full rounded-lg overflow-hidden bg-[#0f172a]"
       style={{ height }}
     >
-      <iframe
-        key={stableKey}
-        src={src}
-        width="100%"
-        height="100%"
-        style={{ border: 'none', display: 'block' }}
-        allowFullScreen
-        loading="lazy"
-        title={`TradingView — ${tvSymbol}`}
-      />
+      {useIframe && (
+        <iframe
+          src={iframeSrc}
+          width="100%"
+          height="100%"
+          style={{ border: 'none', display: 'block' }}
+          allowFullScreen
+          loading="lazy"
+          title={`TradingView — ${tvSymbol}`}
+          referrerpolicy="no-referrer"
+          sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+        />
+      )}
     </div>
   );
 }

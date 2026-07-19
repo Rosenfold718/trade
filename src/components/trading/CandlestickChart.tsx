@@ -15,7 +15,7 @@ import {
   HistogramSeries,
   LineSeries,
 } from 'lightweight-charts';
-import { useRef, useEffect, useMemo } from 'react';
+import { useRef, useEffect, useMemo, useCallback } from 'react';
 
 // ---- Data types (aligned with CryptoDashboard) ----
 
@@ -74,8 +74,10 @@ function formatPrice(price: number): string {
 }
 
 function toTime(timestamp: number): Time {
-  // lightweight-charts expects seconds as number
-  return Math.floor(timestamp / 1000) as Time;
+  // lightweight-charts v5 expects seconds as number
+  const sec = Math.floor(timestamp / 1000);
+  if (sec <= 0 || !isFinite(sec)) return Math.floor(Date.now() / 1000) as Time;
+  return sec as Time;
 }
 
 // ---- Component ----
@@ -106,8 +108,9 @@ export function CandlestickChart({
     if (data.length === 0) return;
 
     // ---- Create chart ----
+    const containerWidth = containerRef.current.clientWidth || 800;
     const chart = createChart(containerRef.current, {
-      autoSize: true,
+      width: containerWidth,
       height,
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
@@ -146,15 +149,32 @@ export function CandlestickChart({
     chartRef.current = chart;
 
     // ---- Candlestick series ----
-    const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: '#10b981',
-      downColor: '#ef4444',
-      borderUpColor: '#10b981',
-      borderDownColor: '#ef4444',
-      wickUpColor: '#10b981',
-      wickDownColor: '#ef4444',
-    });
-    candleSeriesRef.current = candleSeries;
+    let candleSeries: ISeriesApi<'Candlestick'> | ISeriesApi<'Line'>;
+    let usedLineFallback = false;
+    try {
+      candleSeries = chart.addSeries(CandlestickSeries, {
+        upColor: '#10b981',
+        downColor: '#ef4444',
+        borderUpColor: '#10b981',
+        borderDownColor: '#ef4444',
+        wickUpColor: '#10b981',
+        wickDownColor: '#ef4444',
+      });
+      console.log('[CandlestickChart] CandlestickSeries created successfully');
+    } catch (err) {
+      console.error('[CandlestickChart] Failed to create CandlestickSeries, falling back to LineSeries:', err);
+      candleSeries = chart.addSeries(LineSeries, {
+        color: '#3b82f6',
+        lineWidth: 2,
+        priceLineVisible: true,
+        lastValueVisible: true,
+        crosshairMarkerVisible: true,
+        crosshairMarkerRadius: 4,
+      });
+      usedLineFallback = true;
+      console.log('[CandlestickChart] LineSeries fallback created successfully');
+    }
+    candleSeriesRef.current = candleSeries as ISeriesApi<'Candlestick'>;
 
     // ---- Volume series (bottom 20%) ----
     const volumeSeries = chart.addSeries(HistogramSeries, {
@@ -189,7 +209,17 @@ export function CandlestickChart({
     ema21SeriesRef.current = ema21Series;
 
     // ---- Populate data ----
-    const candles: CandlestickData<Time>[] = data.map((d) => ({
+    // Sort data by timestamp ascending (safety) and deduplicate
+    const sortedData = [...data].sort((a, b) => a.timestamp - b.timestamp);
+    const seen = new Set<number>();
+    const dedupedData = sortedData.filter(d => {
+      const ts = toTime(d.timestamp);
+      if (seen.has(ts as number)) return false;
+      seen.add(ts as number);
+      return true;
+    });
+
+    const candles: CandlestickData<Time>[] = dedupedData.map((d) => ({
       time: toTime(d.timestamp),
       open: d.open,
       high: d.high,
@@ -197,13 +227,24 @@ export function CandlestickChart({
       close: d.close,
     }));
 
-    const volumes: HistogramData<Time>[] = data.map((d) => ({
+    const volumes: HistogramData<Time>[] = dedupedData.map((d) => ({
       time: toTime(d.timestamp),
       value: d.volume,
       color: d.close >= d.open ? 'rgba(16,185,129,0.25)' : 'rgba(239,68,68,0.25)',
     }));
 
-    candleSeries.setData(candles);
+    if (usedLineFallback) {
+      // Fallback: set close prices as line data
+      const lineData: LineData<Time>[] = dedupedData.map((d) => ({
+        time: toTime(d.timestamp),
+        value: d.close,
+      }));
+      (candleSeries as ISeriesApi<'Line'>).setData(lineData);
+      console.log('[CandlestickChart] LineSeries fallback data set,', lineData.length, 'points');
+    } else {
+      candleSeries.setData(candles);
+      console.log('[CandlestickChart] CandlestickSeries data set,', candles.length, 'candles');
+    }
     volumeSeries.setData(volumes);
 
     // ---- EMA data ----
@@ -211,7 +252,7 @@ export function CandlestickChart({
       const ema9: LineData<Time>[] = [];
       const ema21: LineData<Time>[] = [];
 
-      for (const d of data) {
+      for (const d of dedupedData) {
         if (d.ema9 != null) ema9.push({ time: toTime(d.timestamp), value: d.ema9 });
         if (d.ema21 != null) ema21.push({ time: toTime(d.timestamp), value: d.ema21 });
       }
@@ -277,8 +318,12 @@ export function CandlestickChart({
       onXMove?.(candle?.close ?? null);
     });
 
-    // ---- Fit content ----
+    // ---- Fit content & ensure visible ----
     chart.timeScale().fitContent();
+    // Force visible range to show the latest candles
+    if (candles.length > 0) {
+      chart.timeScale().scrollToPosition(2, false);
+    }
 
     // ---- Cleanup ----
     return () => {
@@ -293,7 +338,8 @@ export function CandlestickChart({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, tradeSignal, height, showIndicators]);
 
-  // autoSize: true handles resize automatically — no manual ResizeObserver needed
+  // autoSize: true in chart options handles all resizing automatically.
+  // Do NOT add a manual ResizeObserver — it conflicts with autoSize and causes rendering glitches.
 
   // ---- Legend formatting ----
   const lastDataPoint = data.length > 0 ? data[data.length - 1] : null;
@@ -377,7 +423,7 @@ export function CandlestickChart({
       )}
 
       {/* Chart container */}
-      <div ref={containerRef} className="w-full h-full" />
+      <div ref={containerRef} className="w-full h-full" style={{ width: '100%', height: '100%' }} />
 
       {/* Empty state */}
       {data.length === 0 && (

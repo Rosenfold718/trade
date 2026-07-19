@@ -1,5 +1,11 @@
 {
   "framework": "nextjs",
   "buildCommand": "npx next build",
-  "installCommand": "npm install"
+  "installCommand": "npm install",
+  "crons": [
+    {
+      "path": "/api/crypto/auto-trade",
+      "schedule": "*/2 * * * *"
+    }
+  ]
 }

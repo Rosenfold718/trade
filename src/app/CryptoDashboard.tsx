@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
-  TrendingUp, TrendingDown, BarChart3, RefreshCw, Clock,
+  TrendingUp, TrendingDown, BarChart3, RefreshCw, Clock, RotateCcw,
   LineChart, Shield, Eye, Brain, Crosshair, Gauge,
   Activity, TrendingDown as TDown, Loader2, AlertTriangle,
   ChevronUp, ChevronDown, FlaskConical,
@@ -120,7 +120,7 @@ export default function CryptoDashboard() {
   const [loading, setLoading] = useState(true);
   const [chartLoading, setChartLoading] = useState(false);
   const [interval, setInterval_] = useState('1h');
-  const [useTradingView, setUseTradingView] = useState(true);
+  const [useTradingView, setUseTradingView] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [apiSource, setApiSource] = useState('');
   const [lastUpdate, setLastUpdate] = useState(Date.now());
@@ -147,6 +147,7 @@ export default function CryptoDashboard() {
   }, [depositSuccess]);
   const [scanResult, setScanResult] = useState<{ opportunities: any[] } | null>(null);
   const [scanLoading, setScanLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
   const [traderThinking, setTraderThinking] = useState<any>(null);
   const [showThinkingPanel, setShowThinkingPanel] = useState(false);
   const [showPerformanceDashboard, setShowPerformanceDashboard] = useState(false);
@@ -195,11 +196,12 @@ export default function CryptoDashboard() {
     if (abortRef.current) abortRef.current.abort();
     abortRef.current = new AbortController();
     setChartLoading(true);
-    const url = `/api/crypto/signals?coin=${selectedCoin}&interval=${interval}`;
+    // Fast path: skip multi-TF on initial load for speed, fetch MTF separately
+    const url = `/api/crypto/signals?coin=${selectedCoin}&interval=${interval}&skipMultiTF=true`;
     try {
       for (let retry = 0; retry < 3; retry++) {
         try {
-          const ctrl = retry === 0 ? abortRef.current.signal : AbortSignal.timeout(8000);
+          const ctrl = retry === 0 ? abortRef.current.signal : AbortSignal.timeout(10000);
           const res = await fetch(url, { signal: ctrl });
           if (res.ok) {
             const json = await res.json();
@@ -207,6 +209,18 @@ export default function CryptoDashboard() {
             setSignal(json.signal || null);
             setTradeSignal(json.tradeSignal || null);
             setApiSource(json.source || apiSource);
+            // Fetch multi-TF in background (non-blocking)
+            if (json.tradeSignal && json.tradeSignal.direction !== 'FLAT') {
+              const mtfUrl = `/api/crypto/signals?coin=${selectedCoin}&interval=${interval}&skipMultiTF=false`;
+              fetch(mtfUrl, { signal: AbortSignal.timeout(15000) })
+                .then(r => r.ok ? r.json() : null)
+                .then(mtfJson => {
+                  if (mtfJson?.tradeSignal?.multiTimeframe) {
+                    setTradeSignal(prev => prev ? { ...prev, multiTimeframe: mtfJson.tradeSignal.multiTimeframe } : mtfJson.tradeSignal);
+                  }
+                })
+                .catch(() => {});
+            }
             return;
           }
         } catch (e: any) {
@@ -484,8 +498,26 @@ export default function CryptoDashboard() {
     }
   }, [tradeSignal?.direction, tradeSignal?.entry, selectedCoin]);
   useEffect(() => { const iv = setInterval(() => { fetchMarketData(); fetchChartData(); fetchSentiment(); fetchReputation(); fetchThinking(); }, 45000); return () => clearInterval(iv); }, [fetchMarketData, fetchChartData, fetchSentiment, fetchReputation, fetchThinking]);
-  // Run scan every 45 seconds (more aggressive — survival)
-  useEffect(() => { scanAndTrade(); fetchThinking(); const iv = setInterval(scanAndTrade, 45000); return () => clearInterval(iv); }, [scanAndTrade, fetchThinking]);
+  // Server-side auto-trade: trigger autonomous trading cycle via API
+  const triggerAutoTrade = useCallback(async () => {
+    try {
+      const res = await fetch('/api/crypto/auto-trade', { method: 'POST' });
+      if (res.ok) {
+        const result = await res.json();
+        console.log('[auto-trade]', result.summary);
+        // Refresh local state after server-side trade cycle
+        fetchReputation();
+        fetchThinking();
+      }
+    } catch (e) {
+      // Fallback to client-side scan if server endpoint fails
+      console.warn('[auto-trade] server endpoint failed, using client-side fallback');
+      scanAndTrade();
+    }
+  }, [scanAndTrade, fetchReputation, fetchThinking]);
+
+  // Run scan every 45 seconds (server-side first, fallback to client)
+  useEffect(() => { triggerAutoTrade(); fetchThinking(); const iv = setInterval(triggerAutoTrade, 45000); return () => clearInterval(iv); }, [triggerAutoTrade, fetchThinking]);
 
   // Auto-sync position tool with new signals
   useEffect(() => {
@@ -539,6 +571,10 @@ export default function CryptoDashboard() {
                 {reputation.streak !== 0 && <span className={`text-[9px] font-bold ${reputation.streak > 0 ? 'text-emerald-500' : 'text-red-500'}`}>{reputation.streak > 0 ? `${reputation.streak}W` : `${Math.abs(reputation.streak)}L`}</span>}
               </button>
             )}
+            <button onClick={async () => { setResetLoading(true); try { await fetch('/api/crypto/trader-reset', { method: 'DELETE' }); await fetch('/api/crypto/trader-thinking', { method: 'DELETE' }); motivationRef.current = 0; await fetchThinking(); fetchReputation(); setTimeout(() => { triggerAutoTrade(); scanAndTrade(); }, 500); } catch {} finally { setResetLoading(false); } }} disabled={resetLoading} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border transition-colors cursor-pointer ${resetLoading ? 'border-red-500/50 bg-red-500/10 opacity-50' : 'border-red-500/30 bg-red-500/5 hover:bg-red-500/10'}`} title="Перезапустить трейдера с нуля">
+              <RotateCcw className={`w-3.5 h-3.5 text-red-400 ${resetLoading ? 'animate-spin' : ''}`} />
+              <span className="text-[10px] font-bold text-red-400">{resetLoading ? '...' : 'Рестарт'}</span>
+            </button>
             <button onClick={() => setShowThinkingPanel(!showThinkingPanel)} className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border transition-colors cursor-pointer ${showThinkingPanel ? 'border-amber-500/50 bg-amber-500/10' : 'border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10'}`}>
               <Brain className="w-3.5 h-3.5 text-amber-500" />
               <span className="text-[10px] font-bold text-amber-500">Мышление</span>

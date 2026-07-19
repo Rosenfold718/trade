@@ -18,7 +18,11 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: 'Content-Security-Policy',
-            value: "frame-ancestors 'self' https://s.tradingview.com https://www.tradingview.com https://preview-*.space-z.ai",
+            value: [
+              "frame-ancestors 'self' https://s.tradingview.com https://www.tradingview.com https://preview-*.space-z.ai",
+              "frame-src 'self' https://s.tradingview.com https://www.tradingview.com https://s3.tradingview.com",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://s3.tradingview.com https://s.tradingview.com",
+            ].join('; '),
           },
           {
             key: 'X-Frame-Options',

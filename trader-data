@@ -1,0 +1,54 @@
+{
+  "initialDeposit": 100,
+  "balance": 100,
+  "totalTrades": 0,
+  "wins": 0,
+  "losses": 0,
+  "expired": 0,
+  "score": 0,
+  "winRate": 0,
+  "avgPnl": 0,
+  "streak": 0,
+  "bestTrade": 0,
+  "worstTrade": 0,
+  "totalPnl": 0,
+  "level": "Новичок",
+  "levelEmoji": "🌱",
+  "riskPerTrade": 5,
+  "defaultLeverage": 3,
+  "trades": [],
+  "depositHistory": [
+    {
+      "timestamp": 1784474827028,
+      "balance": 100,
+      "equity": 100
+    }
+  ],
+  "lastUpdated": 1784474827061,
+  "totalDebt": 0,
+  "debtHistory": [],
+  "totalRepaid": 0,
+  "adaptive": {
+    "minSlDistancePct": 1,
+    "minConfidence": 60,
+    "avoidCoins": [
+      "tether",
+      "usd-coin",
+      "dai",
+      "binance-usd",
+      "staked-ether",
+      "wrapped-bitcoin",
+      "usds"
+    ],
+    "minRr": 1.5,
+    "counterTrendPenalty": 0.1,
+    "limitExpiryHours": 2,
+    "marketEntryConditions": [
+      "strong_momentum",
+      "breakout",
+      "high_confidence"
+    ],
+    "lessons": [],
+    "lessonsVersion": 0
+  }
+}
