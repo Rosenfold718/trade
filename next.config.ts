@@ -6,6 +6,8 @@ const nextConfig: NextConfig = {
   },
   reactStrictMode: false,
   output: 'standalone',
+  // Vercel overrides standalone output
+  ...(process.env.VERCEL ? { output: undefined } : {}),
   allowedDevOrigins: [
     ".space-z.ai",
   ],
