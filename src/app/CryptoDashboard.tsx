@@ -190,32 +190,38 @@ export default function CryptoDashboard() {
     try { const res = await fetch('/api/crypto/market'); if (res.ok) { const json = await res.json(); setCoins(json.data || []); setApiSource(json.source || ''); setLastUpdate(Date.now()); } } catch {} finally { setLoading(false); }
   }, []);
 
-  const fetchChartData = useCallback(async (retryCount = 0) => {
+  const fetchChartData = useCallback(async () => {
     if (!selectedCoin) return;
     if (abortRef.current) abortRef.current.abort();
     abortRef.current = new AbortController();
     setChartLoading(true);
-    try {
-      const res = await fetch(`/api/crypto/signals?coin=${selectedCoin}&interval=${interval}`, { signal: abortRef.current.signal });
-      if (!res.ok) {
-        // Retry up to 2 times with 1.5s delay
-        if (retryCount < 2) {
-          await new Promise(r => setTimeout(r, 1500));
-          return fetchChartData(retryCount + 1);
+    const url = `/api/crypto/signals?coin=${selectedCoin}&interval=${interval}`;
+    for (let retry = 0; retry < 3; retry++) {
+      try {
+        const ctrl = retry === 0 ? abortRef.current.signal : AbortSignal.timeout(8000);
+        const res = await fetch(url, { signal: ctrl });
+        if (res.ok) {
+          const json = await res.json();
+          setChartData(json.chartData || []);
+          setSignal(json.signal || null);
+          setTradeSignal(json.tradeSignal || null);
+          setApiSource(json.source || apiSource);
+          return;
         }
-        setChartData([]); setSignal({ type: 'HOLD', strength: 0, indicators: [], summary: 'Данные недоступны. Попробуйте обновить.' }); setTradeSignal(null); return;
+      } catch (e: any) {
+        if (e.name === 'AbortError' && retry === 0) return; // user changed coin
       }
-      const json = await res.json();
-      setChartData(json.chartData || []);
-      setSignal(json.signal || null);
-      setTradeSignal(json.tradeSignal || null);
-      setApiSource(json.source || apiSource);
-    } catch { if (retryCount === 0) return; setChartData([]); setTradeSignal(null); } finally { setChartLoading(false); }
+      if (retry < 2) await new Promise(r => setTimeout(r, 1500));
+    }
+    setChartData([]); setSignal({ type: 'HOLD', strength: 0, indicators: [], summary: 'Данные недоступны. Попробуйте обновить.' }); setTradeSignal(null);
   }, [selectedCoin, interval, apiSource]);
 
   const fetchSentiment = useCallback(async () => {
     try { const res = await fetch('/api/crypto/sentiment'); if (res.ok) setSentiment(await res.json()); } catch {}
   }, []);
+
+  const reputationRef = useRef(reputation);
+  reputationRef.current = reputation;
 
   const fetchReputation = useCallback(async () => {
     try {
@@ -238,7 +244,7 @@ export default function CryptoDashboard() {
       } else {
         // API returned non-OK — build from localStorage fallback
         const localOverrides = loadLocalTraderOverrides();
-        if (localOverrides && !reputation) {
+        if (localOverrides && !reputationRef.current) {
           const bal = localOverrides.balance ?? 100;
           const debt = localOverrides.totalDebt ?? 0;
           setReputation({
@@ -260,7 +266,7 @@ export default function CryptoDashboard() {
     } catch {
       // Network error — build from localStorage fallback
       const localOverrides = loadLocalTraderOverrides();
-      if (localOverrides && !reputation) {
+      if (localOverrides && !reputationRef.current) {
         const bal = localOverrides.balance ?? 100;
         const debt = localOverrides.totalDebt ?? 0;
         setReputation({
@@ -279,7 +285,7 @@ export default function CryptoDashboard() {
         });
       }
     }
-  }, [reputation]);
+  }, []);
 
   const recordThought = useCallback(async (thought: any) => {
     try { await fetch('/api/crypto/trader-thinking', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(thought) }); } catch {}
@@ -296,11 +302,11 @@ export default function CryptoDashboard() {
     try {
       // Always persist credit locally (Vercel has no persistent FS)
       const overrides = loadLocalTraderOverrides() || {};
-      const currentBalance = overrides.balance ?? reputation?.balance ?? 100;
-      const currentDebt = overrides.totalDebt ?? reputation?.totalDebt ?? 0;
-      const currentDebtHistory = overrides.debtHistory ?? reputation?.debtHistory ?? [];
-      const currentDepositHistory = overrides.depositHistory ?? reputation?.depositHistory ?? [];
-      const currentInitial = overrides.initialDeposit ?? reputation?.initialDeposit ?? 100;
+      const currentBalance = overrides.balance ?? reputationRef.current?.balance ?? 100;
+      const currentDebt = overrides.totalDebt ?? reputationRef.current?.totalDebt ?? 0;
+      const currentDebtHistory = overrides.debtHistory ?? reputationRef.current?.debtHistory ?? [];
+      const currentDepositHistory = overrides.depositHistory ?? reputationRef.current?.depositHistory ?? [];
+      const currentInitial = overrides.initialDeposit ?? reputationRef.current?.initialDeposit ?? 100;
 
       const newBalance = currentBalance + amount;
       const newDebt = currentDebt + amount;
@@ -320,7 +326,7 @@ export default function CryptoDashboard() {
       // Re-fetch to merge
       fetchReputation();
     } catch {} finally { setDepositLoading(false); }
-  }, [depositAmount, fetchReputation, reputation]);
+  }, [depositAmount, fetchReputation]);
 
   const deleteTrade = useCallback(async (tradeId: string) => {
     try { const res = await fetch('/api/crypto/reputation', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tradeId }) }); if (res.ok) fetchReputation(); } catch {}

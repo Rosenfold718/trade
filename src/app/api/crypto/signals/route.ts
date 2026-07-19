@@ -190,7 +190,6 @@ function cleanCache() {
       }
     }
   }
-  if (global.gc) global.gc();
 }
 
 export async function GET(request: Request) {

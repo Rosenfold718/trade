@@ -267,13 +267,14 @@ export function CandlestickChart({
     // Current price is derived from data prop via useMemo above
 
     // ---- Crosshair callback ----
+    const onXMove = onCrosshairMove;
     chart.subscribeCrosshairMove((param) => {
       if (!param || !param.time) {
-        onCrosshairMove?.(null);
+        onXMove?.(null);
         return;
       }
       const candle = param.seriesData.get(candleSeries) as CandlestickData<Time> | undefined;
-      onCrosshairMove?.(candle?.close ?? null);
+      onXMove?.(candle?.close ?? null);
     });
 
     // ---- Fit content ----
@@ -289,7 +290,8 @@ export function CandlestickChart({
       ema21SeriesRef.current = null;
       priceLinesRef.current = [];
     };
-  }, [data, tradeSignal, height, showIndicators, onCrosshairMove]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, tradeSignal, height, showIndicators]);
 
   // autoSize: true handles resize automatically — no manual ResizeObserver needed
 

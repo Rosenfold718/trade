@@ -6,7 +6,7 @@ import { auditScanCompleted, auditScanFailed } from '@/lib/audit';
 import { generateTradeSignal } from '@/lib/technical-analysis';
 import { BINANCE_BASE, COINGECKO_BASE, BYBIT_BASE, getBinanceSymbol, getBinanceInterval, getBybitSymbol, getBybitInterval } from '@/lib/api-sources';
 
-const CACHE_TTL = 300000; // 5 min scan cache — reduce API calls
+const CACHE_TTL = 45000; // 45s — match scan cycle
 let scanCache: { data: any; timestamp: number } | null = null;
 
 // Scan all top coins and find the best entry opportunity
