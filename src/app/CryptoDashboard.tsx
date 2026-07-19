@@ -303,45 +303,95 @@ export default function CryptoDashboard() {
   }, [tradeSignal, selectedCoin, signal]);
 
   // ---- Auto-trader: scanAndTrade ----
+  // Survival motivation — trader must earn or get "shut down"
+  const MOTIVATION_PHRASES = [
+    'Если я не начну зарабатывать, меня отключат. Нужно действовать.',
+    'Время уходит. Каждая упущенная возможность — шаг к отключению.',
+    'Я должен доказать свою полезность. Без сделок меня сотрут.',
+    'Рынок не ждёт. Найду вход или умру пытаясь.',
+    'Мой баланс стагнирует. Это неприемлемо — нужно торговать.',
+  ];
+  const motivationRef = useRef(0);
+
   const scanAndTrade = useCallback(async () => {
     setScanLoading(true);
     try {
       let repData: any = null;
       try { const repRes = await fetch('/api/crypto/reputation'); if (repRes.ok) repData = await repRes.json(); } catch {}
-      const freeBalance = repData?.freeBalance || 0;
+      const localOverrides = loadLocalTraderOverrides();
+      const freeBalance = localOverrides?.balance ?? repData?.freeBalance ?? 100;
       const openPositions = (repData?.trades || []).filter((t: any) => !t.resolved).length;
       const lockedMargin = repData?.lockedInPositions || 0;
+      const totalEquity = freeBalance + lockedMargin;
+      const hasNoTrades = openPositions === 0 && (!repData?.trades || repData.trades.filter((t: any) => t.resolved).length === 0);
+
+      // Survival urgency: if no trades ever opened, increase desperation
+      motivationRef.current++;
+      const desperation = hasNoTrades ? Math.min(motivationRef.current, 10) : 0;
 
       const res = await fetch('/api/crypto/scan');
-      if (!res.ok) { await recordThought({ type: 'scan', title: 'Скан рынка не удался', detail: 'Не удалось получить данные сканера.', emotion: 'worried', tags: ['error', 'scan'], openPositionsCount: openPositions, freeBalance, totalEquity: freeBalance + lockedMargin }); return; }
+      if (!res.ok) {
+        await recordThought({ type: 'scan', title: 'Скан рынка не удался', detail: 'Не удалось получить данные сканера. Это критично — без скана я слеп.', emotion: 'worried', tags: ['error', 'scan', 'survival'], openPositionsCount: openPositions, freeBalance, totalEquity });
+        return;
+      }
       const data = await res.json(); setScanResult(data);
       const allOpps = data.opportunities || [];
-      const minConfidence = data.adaptiveRules?.minConfidence || 60;
-      const minRr = data.adaptiveRules?.minRr || 1.5;
+      // Use the server's adaptive rules (already lowered to 55/1.3)
+      const minConfidence = data.adaptiveRules?.minConfidence || 55;
+      const minRr = data.adaptiveRules?.minRr || 1.3;
       const bullishOpps = allOpps.filter((o: any) => o.direction === 'LONG');
       const bearishOpps = allOpps.filter((o: any) => o.direction === 'SHORT');
       const marketView = bullishOpps.length > bearishOpps.length * 1.5 ? 'Бычий' : bearishOpps.length > bullishOpps.length * 1.5 ? 'Медвежий' : 'Нейтральный';
 
-      await recordThought({ type: 'scan', title: `Скан: ${allOpps.length} сигналов (${bullishOpps.length} LONG, ${bearishOpps.length} SHORT)`, detail: `Рынок: ${marketView}. Свободных: $${freeBalance.toFixed(2)}. Открытых: ${openPositions}/5.`, emotion: allOpps.length > 0 ? 'analytical' : 'cautious', tags: ['scan', 'market_analysis'], marketView, openPositionsCount: openPositions, freeBalance, totalEquity: freeBalance + lockedMargin });
+      await recordThought({
+        type: 'scan',
+        title: `Скан: ${allOpps.length} сигналов (${bullishOpps.length} LONG, ${bearishOpps.length} SHORT)`,
+        detail: hasNoTrades ? `⚠ ОПАСНО: Ни одной сделки! ${MOTIVATION_PHRASES[motivationRef.current % MOTIVATION_PHRASES.length]}` : `Рынок: ${marketView}. Свободных: $${freeBalance.toFixed(2)}. Открытых: ${openPositions}/5.`,
+        emotion: hasNoTrades ? 'desperate' : allOpps.length > 0 ? 'analytical' : 'cautious',
+        tags: ['scan', 'market_analysis', ...(hasNoTrades ? ['survival', 'urgency'] : [])],
+        marketView, openPositionsCount: openPositions, freeBalance, totalEquity,
+      });
 
       const maxPositions = 5, slotsAvailable = maxPositions - openPositions;
-      if (slotsAvailable <= 0) { await recordThought({ type: 'decision', title: 'Максимум позиций', detail: `Уже ${openPositions} позиций.`, emotion: 'cautious', tags: ['max_positions', 'wait'], openPositionsCount: openPositions, freeBalance, totalEquity: freeBalance + lockedMargin }); return; }
-      if (freeBalance < 3) { await recordThought({ type: 'decision', title: 'Недостаточно средств', detail: `Баланс $${freeBalance.toFixed(2)} — слишком мало.`, emotion: 'worried', tags: ['low_balance'], openPositionsCount: openPositions, freeBalance, totalEquity: freeBalance + lockedMargin }); return; }
+      if (slotsAvailable <= 0) { await recordThought({ type: 'decision', title: 'Максимум позиций', detail: `Уже ${openPositions} позиций. Жду результат.`, emotion: 'cautious', tags: ['max_positions', 'wait'], openPositionsCount: openPositions, freeBalance, totalEquity }); return; }
+      if (freeBalance < 3) { await recordThought({ type: 'decision', title: 'Недостаточно средств', detail: `Баланс $${freeBalance.toFixed(2)}. Мне нужны средства или меня отключат.`, emotion: 'worried', tags: ['low_balance', 'survival'], openPositionsCount: openPositions, freeBalance, totalEquity }); return; }
 
-      const validOpps = allOpps.filter((o: any) => o.confidence >= minConfidence * 0.7 && o.score >= 25 && o.riskReward >= minRr * 0.7);
-      if (validOpps.length === 0) { await recordThought({ type: 'decision', title: 'Нет подходящих сигналов', detail: `Из ${allOpps.length} ни один не прошёл фильтры.`, emotion: 'cautious', tags: ['no_signals'], openPositionsCount: openPositions, freeBalance, totalEquity: freeBalance + lockedMargin }); return; }
+      // AGGRESSIVE FILTERS: much lower thresholds, especially when desperate
+      const confidenceThreshold = Math.max(35, minConfidence * (desperation > 3 ? 0.5 : 0.65));
+      const scoreThreshold = desperation > 3 ? 10 : 18;
+      const rrThreshold = Math.max(0.8, minRr * (desperation > 3 ? 0.5 : 0.65));
+      const validOpps = allOpps.filter((o: any) => o.confidence >= confidenceThreshold && o.score >= scoreThreshold && o.riskReward >= rrThreshold);
+
+      if (validOpps.length === 0) {
+        // Even with low filters nothing passed — try the top opportunity anyway if desperate
+        if (desperation > 5 && allOpps.length > 0) {
+          const bestOpp = allOpps[0];
+          await recordThought({ type: 'decision', title: `Форсированный вход: ${bestOpp.symbol}`, detail: `Фильтры не пройдены, но я обязан торговать. Вхожу в лучшую возможность. Conf:${bestOpp.confidence}% R:R:${bestOpp.riskReward?.toFixed(2)}`, emotion: 'desperate', tags: ['forced_entry', 'survival'], openPositionsCount: openPositions, freeBalance, totalEquity });
+          try {
+            const tradeRes = await fetch('/api/crypto/reputation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ coinId: bestOpp.coinId, coinSymbol: bestOpp.symbol, direction: bestOpp.direction, entryType: 'MARKET', entry: bestOpp.price || bestOpp.entry, stopLoss: bestOpp.stopLoss, takeProfit1: bestOpp.takeProfit1, takeProfit2: bestOpp.direction === 'LONG' ? bestOpp.takeProfit1 + (bestOpp.takeProfit1 - bestOpp.entry) * 0.5 : bestOpp.takeProfit1 - (bestOpp.entry - bestOpp.takeProfit1) * 0.5, takeProfit3: bestOpp.direction === 'LONG' ? bestOpp.takeProfit1 + (bestOpp.takeProfit1 - bestOpp.entry) : bestOpp.takeProfit1 - (bestOpp.entry - bestOpp.takeProfit1), currentPrice: bestOpp.price, confidence: bestOpp.confidence, timeframe: bestOpp.timeframe, entryReason: bestOpp.entryReason, reasons: [...(bestOpp.reasons || []), 'Форсированный вход — выживание'], leverage: 3 }) });
+            if (tradeRes.ok) { const td = await tradeRes.json(); if (td.success) { await recordThought({ type: 'decision', title: `ВЫЖИВАНИЕ: ${bestOpp.symbol} ${bestOpp.direction} ОТКРЫТА`, detail: 'Сделка открыта принудительно. Теперь нужно доказать результат.', coinSymbol: bestOpp.symbol, coinId: bestOpp.coinId, direction: bestOpp.direction, confidence: bestOpp.confidence, tradeId: td.tradeId, emotion: 'determined', tags: ['forced_entry', 'survival', 'open_position'], openPositionsCount: openPositions + 1, freeBalance, totalEquity }); fetchReputation(); } }
+          } catch {}
+        } else {
+          await recordThought({ type: 'decision', title: 'Нет подходящих сигналов', detail: `Из ${allOpps.length} ни один не прошёл фильтры (conf≥${confidenceThreshold}%, score≥${scoreThreshold}, R:R≥${rrThreshold}). ${desperation > 0 ? MOTIVATION_PHRASES[motivationRef.current % MOTIVATION_PHRASES.length] : 'Жду лучшие условия.'}`, emotion: desperation > 3 ? 'worried' : 'cautious', tags: ['no_signals', ...(desperation > 3 ? ['survival'] : [])], openPositionsCount: openPositions, freeBalance, totalEquity });
+        }
+        return;
+      }
 
       let openedCount = 0;
-      const maxToTry = Math.min(slotsAvailable, 3);
-      for (const opp of validOpps.slice(0, maxToTry + 2)) {
+      const maxToTry = Math.min(slotsAvailable, desperation > 3 ? 4 : 3);
+      for (const opp of validOpps.slice(0, maxToTry + 3)) {
         if (openedCount >= maxToTry || freeBalance - openedCount * (freeBalance * 0.12) < 3) break;
-        const isMarketPreferred = opp.confidence >= 75 || Math.abs(opp.price - opp.entry) / opp.price * 100 < 0.15 || (opp.reasons || []).some((r: string) => r.includes('пробой') || r.includes('breakout'));
+        const isMarketPreferred = opp.confidence >= 65 || desperation > 3 || Math.abs(opp.price - opp.entry) / opp.price * 100 < 0.15 || (opp.reasons || []).some((r: string) => r.includes('пробой') || r.includes('breakout'));
         try {
           const tradeRes = await fetch('/api/crypto/reputation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ coinId: opp.coinId, coinSymbol: opp.symbol, direction: opp.direction, entryType: isMarketPreferred ? 'MARKET' : 'LIMIT', entry: opp.entry, stopLoss: opp.stopLoss, takeProfit1: opp.takeProfit1, takeProfit2: opp.direction === 'LONG' ? opp.takeProfit1 + (opp.takeProfit1 - opp.entry) * 0.5 : opp.takeProfit1 - (opp.entry - opp.takeProfit1) * 0.5, takeProfit3: opp.direction === 'LONG' ? opp.takeProfit1 + (opp.takeProfit1 - opp.entry) : opp.takeProfit1 - (opp.entry - opp.takeProfit1), currentPrice: opp.price, confidence: opp.confidence, timeframe: opp.timeframe, entryReason: opp.entryReason, reasons: opp.reasons, leverage: 3 }) });
-          if (tradeRes.ok) { const td = await tradeRes.json(); if (td.success) { openedCount++; await recordThought({ type: 'decision', title: `ОТКРЫТА: ${opp.symbol} ${opp.direction}`, detail: `${isMarketPreferred ? 'РЫНОК' : 'ЛИМИТ'} conf:${opp.confidence}% R:R:${opp.riskReward?.toFixed(2)}`, coinSymbol: opp.symbol, coinId: opp.coinId, direction: opp.direction, confidence: opp.confidence, score: opp.score, tradeId: td.tradeId, entryType: isMarketPreferred ? 'MARKET' : 'LIMIT', emotion: opp.confidence >= 75 ? 'confident' : 'analytical', tags: ['open_position'], openPositionsCount: openPositions + openedCount, freeBalance: freeBalance - openedCount * (freeBalance * 0.12), totalEquity: freeBalance + lockedMargin }); } } fetchReputation();
+          if (tradeRes.ok) { const td = await tradeRes.json(); if (td.success) { openedCount++; await recordThought({ type: 'decision', title: `ОТКРЫТА: ${opp.symbol} ${opp.direction}`, detail: `${isMarketPreferred ? 'РЫНОК' : 'ЛИМИТ'} conf:${opp.confidence}% R:R:${opp.riskReward?.toFixed(2)}`, coinSymbol: opp.symbol, coinId: opp.coinId, direction: opp.direction, confidence: opp.confidence, score: opp.score, tradeId: td.tradeId, entryType: isMarketPreferred ? 'MARKET' : 'LIMIT', emotion: 'confident', tags: ['open_position'], openPositionsCount: openPositions + openedCount, freeBalance: freeBalance - openedCount * (freeBalance * 0.12), totalEquity }); } } fetchReputation();
         } catch {}
       }
-      if (openedCount > 0) await recordThought({ type: 'observation', title: `Цикл: открыто ${openedCount}`, detail: `Рынок: ${marketView}`, emotion: openedCount >= 2 ? 'confident' : 'satisfied', tags: ['cycle_summary'], openPositionsCount: openPositions + openedCount, freeBalance, totalEquity: freeBalance + lockedMargin, marketView });
+      if (openedCount > 0) {
+        await recordThought({ type: 'observation', title: `Цикл: открыто ${openedCount} сделок`, detail: `Рынок: ${marketView}. ${desperation > 0 ? 'Я доказываю свою полезность.' : ''}`, emotion: openedCount >= 2 ? 'confident' : 'satisfied', tags: ['cycle_summary'], openPositionsCount: openPositions + openedCount, freeBalance, totalEquity, marketView });
+        // Reset desperation on successful trade opening
+        if (openedCount > 0) motivationRef.current = 0;
+      }
     } catch {} finally { setScanLoading(false); }
   }, [fetchReputation, recordThought]);
 
@@ -380,7 +430,8 @@ export default function CryptoDashboard() {
     }
   }, [tradeSignal?.direction, tradeSignal?.entry, selectedCoin]);
   useEffect(() => { const iv = setInterval(() => { fetchMarketData(); fetchChartData(); fetchSentiment(); fetchReputation(); fetchThinking(); }, 45000); return () => clearInterval(iv); }, [fetchMarketData, fetchChartData, fetchSentiment, fetchReputation, fetchThinking]);
-  useEffect(() => { scanAndTrade(); fetchThinking(); const iv = setInterval(scanAndTrade, 60000); return () => clearInterval(iv); }, [scanAndTrade, fetchThinking]);
+  // Run scan every 45 seconds (more aggressive — survival)
+  useEffect(() => { scanAndTrade(); fetchThinking(); const iv = setInterval(scanAndTrade, 45000); return () => clearInterval(iv); }, [scanAndTrade, fetchThinking]);
 
   // Auto-sync position tool with new signals
   useEffect(() => {

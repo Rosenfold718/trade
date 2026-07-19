@@ -86,9 +86,19 @@
       "timestamp": 1784442551854,
       "balance": 76,
       "equity": 100
+    },
+    {
+      "timestamp": 1784442881138,
+      "balance": 76,
+      "equity": 100
+    },
+    {
+      "timestamp": 1784443209318,
+      "balance": 76,
+      "equity": 100
     }
   ],
-  "lastUpdated": 1784442611373,
+  "lastUpdated": 1784443347496,
   "totalDebt": 0,
   "debtHistory": [],
   "totalRepaid": 0,

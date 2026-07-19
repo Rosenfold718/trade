@@ -796,11 +796,15 @@ function calcUnrealizedPnL(trades: Trade[], currentPrices: Record<string, number
 async function getCurrentPrices(): Promise<Record<string, number>> {
   const currentPrices: Record<string, number> = {};
   try {
-    const marketRes = await fetch(`http://localhost:${process.env.PORT || 3000}/api/crypto/market`);
-    if (marketRes.ok) {
-      const marketData = await marketRes.json();
-      if (Array.isArray(marketData.data)) {
-        for (const coin of marketData.data) {
+    // Fetch directly from CoinGecko (no localhost — works on Vercel)
+    const res = await fetch(
+      'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false',
+      { signal: AbortSignal.timeout(8000) },
+    );
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        for (const coin of data) {
           currentPrices[coin.id] = coin.current_price;
         }
       }

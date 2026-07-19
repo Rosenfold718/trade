@@ -146,17 +146,27 @@ export async function fetchSentimentData(): Promise<{ fearGreedValue: number; ov
   }
 
   try {
-    const port = process.env.PORT || 3000;
-    const res = await fetch(`http://localhost:${port}/api/crypto/sentiment`, {
+    // Fetch directly from Fear & Greed API (no localhost — works on Vercel)
+    const fgRes = await fetch('https://api.alternative.me/fng/?limit=1', {
       signal: AbortSignal.timeout(5000),
     });
-    if (!res.ok) return null;
+    if (!fgRes.ok) return null;
 
-    const data = await res.json();
+    const fgData = await fgRes.json();
+    const fgValue = fgData?.data?.[0]?.value ? parseInt(fgData.data[0].value, 10) : 50;
+    const fgClassification = fgData?.data?.[0]?.value_classification || 'Neutral';
+
+    let overallSentiment = 'NEUTRAL';
+    if (fgValue <= 25) overallSentiment = 'EXTREME_FEAR';
+    else if (fgValue <= 45) overallSentiment = 'FEAR';
+    else if (fgValue <= 55) overallSentiment = 'NEUTRAL';
+    else if (fgValue <= 75) overallSentiment = 'GREED';
+    else overallSentiment = 'EXTREME_GREED';
+
     const result = {
-      fearGreedValue: data.fearGreed?.value ?? 50,
-      overallSentiment: data.overallSentiment ?? 'NEUTRAL',
-      sentimentScore: data.sentimentScore ?? 50,
+      fearGreedValue: fgValue,
+      overallSentiment,
+      sentimentScore: fgValue,
     };
 
     sentimentCache = { data: result, timestamp: now };
