@@ -1,11 +1,9 @@
 import { NextResponse } from 'next/server';
 import { rateLimit } from '@/lib/rate-limit';
 import { RATE_LIMITS } from '@/lib/api-rate-limits';
-import { readFile, writeFile } from 'fs/promises';
-import { existsSync } from 'fs';
-import path from 'path';
+import { storeRead, storeWrite, storeDelete } from '@/lib/memory-store';
 
-const THINKING_PATH = path.join(process.cwd(), 'trader-thinking.json');
+const STORE_KEY = 'trader-thinking';
 
 interface Thought {
   id: string;
@@ -49,8 +47,8 @@ const DEFAULT_SESSION: ThinkingSession = {
 
 async function loadThinking(): Promise<ThinkingSession> {
   try {
-    if (existsSync(THINKING_PATH)) {
-      const raw = await readFile(THINKING_PATH, 'utf-8');
+    const raw = await storeRead(STORE_KEY);
+    if (raw) {
       const parsed = JSON.parse(raw);
       return { ...DEFAULT_SESSION, ...parsed, thoughts: parsed.thoughts || [] };
     }
@@ -59,11 +57,7 @@ async function loadThinking(): Promise<ThinkingSession> {
 }
 
 async function saveThinking(session: ThinkingSession) {
-  try {
-    await writeFile(THINKING_PATH, JSON.stringify(session, null, 2), 'utf-8');
-  } catch (e) {
-    console.error('Failed to save thinking:', e);
-  }
+  await storeWrite(STORE_KEY, JSON.stringify(session, null, 2));
 }
 
 // GET: Retrieve trader's thinking log

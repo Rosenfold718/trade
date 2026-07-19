@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
 import { rateLimit } from '@/lib/rate-limit';
 import { RATE_LIMITS } from '@/lib/api-rate-limits';
-import { readFile, writeFile } from 'fs/promises';
-import { existsSync } from 'fs';
-import path from 'path';
+import { storeRead, storeWrite } from '@/lib/memory-store';
 import {
   calculateRealisticPnL,
   updateTrailingStop,
@@ -19,8 +17,8 @@ import {
   auditDrawdownWarning,
 } from '@/lib/audit';
 
-const DATA_PATH = path.join(process.cwd(), 'trader-data.json');
-const THINKING_PATH = path.join(process.cwd(), 'trader-thinking.json');
+const DATA_STORE_KEY = 'trader-data';
+const THINKING_STORE_KEY = 'trader-thinking';
 
 // ============================================
 // TYPES
@@ -183,8 +181,8 @@ async function loadData(): Promise<TraderData> {
     adaptive: { ...DEFAULT_ADAPTIVE, lessons: [] },
   };
   try {
-    if (existsSync(DATA_PATH)) {
-      const raw = await readFile(DATA_PATH, 'utf-8');
+    const raw = await storeRead(DATA_STORE_KEY);
+    if (raw) {
       const parsed = JSON.parse(raw);
       return {
         ...defaultData, ...parsed,
@@ -200,11 +198,7 @@ async function loadData(): Promise<TraderData> {
 }
 
 async function saveData(data: TraderData) {
-  try {
-    await writeFile(DATA_PATH, JSON.stringify(data, null, 2), 'utf-8');
-  } catch (e) {
-    console.error('Failed to save trader data:', e);
-  }
+  await storeWrite(DATA_STORE_KEY, JSON.stringify(data, null, 2));
 }
 
 // Record a thought to the trader's thinking log (called on trade close/expire)
@@ -217,8 +211,8 @@ async function recordThought(thought: {
 }) {
   try {
     let session: any = { thoughts: [] };
-    if (existsSync(THINKING_PATH)) {
-      const raw = await readFile(THINKING_PATH, 'utf-8');
+    const raw = await storeRead(THINKING_STORE_KEY);
+    if (raw) {
       session = JSON.parse(raw);
     }
     session.thoughts = session.thoughts || [];
@@ -230,7 +224,7 @@ async function recordThought(thought: {
       tags: thought.tags || [],
     });
     session.thoughts = session.thoughts.slice(0, 200);
-    await writeFile(THINKING_PATH, JSON.stringify(session, null, 2), 'utf-8');
+    await storeWrite(THINKING_STORE_KEY, JSON.stringify(session, null, 2));
   } catch (e) {
     console.error('Failed to record thought:', e);
   }
