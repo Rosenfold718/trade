@@ -220,6 +220,7 @@ function calcATR(candles: OhlcvCandle[], period: number = 14): number[] {
 // ─── Viability calculator ───
 
 function computeViability(summary: {
+  totalTrades: number;
   winRate: number;
   profitFactor: number;
   maxDrawdownPercent: number;
@@ -227,6 +228,16 @@ function computeViability(summary: {
 }): ViabilityInfo {
   const warnings: string[] = [];
   let score = 0;
+
+  // 0 trades = insufficient data, not a bad strategy
+  if (summary.totalTrades === 0) {
+    return {
+      score: 0,
+      isViable: false,
+      warnings: ['Нет сделок за выбранный период'],
+      recommendation: 'Стратегия не нашла сигналов. Попробуйте другой таймфрейм (например, 15М или 5М) или увеличьте количество дней.',
+    };
+  }
 
   if (summary.winRate > 50) {
     score += 25;
@@ -332,7 +343,7 @@ function runClientBacktest(
     const currentRSI = rsi[i] || 50;
     const currentVol = candle.volume;
     const volAvg = avgVolume20[i] || currentVol;
-    const volumeOk = currentVol > volAvg * 0.8;
+    const volumeOk = currentVol > volAvg * 0.5;
 
     // Report progress
     onProgress(i - startIdx, totalCandles - startIdx);
@@ -421,9 +432,9 @@ function runClientBacktest(
     const isUptrend = ema50[i] > ema50[i - 1];
     const isDowntrend = ema50[i] < ema50[i - 1];
 
-    // RSI filter helpers
-    const rsiNotOverbought = currentRSI < 70;
-    const rsiNotOversold = currentRSI > 30;
+    // RSI filter — only block at extremes
+    const rsiNotOverbought = currentRSI < 80;
+    const rsiNotOversold = currentRSI > 20;
 
     // ATR-based SL/TP distances
     const slDistance = 1.5 * currentATR;
@@ -434,10 +445,17 @@ function runClientBacktest(
       const prevEma9 = ema9[i - 1];
       const prevEma21 = ema21[i - 1];
 
-      // LONG: EMA9 crosses above EMA21, uptrend, RSI ok, volume ok
+      // Check if crossover happened in last 3 candles (not just exact candle)
+      const recentCrossUp = ema9[i] > ema21[i] && (prevEma9 <= prevEma21 || (i >= 2 && ema9[i - 2] <= ema21[i - 2]) || (i >= 3 && ema9[i - 3] <= ema21[i - 3]));
+      const recentCrossDown = ema9[i] < ema21[i] && (prevEma9 >= prevEma21 || (i >= 2 && ema9[i - 2] >= ema21[i - 2]) || (i >= 3 && ema9[i - 3] >= ema21[i - 3]));
+      // Prevent re-entry: no new position if one was opened in last 10 candles for same direction
+      const noRecentLong = !openPositions.some(p => p.direction === 'LONG' && i - p.entryIndex < 10);
+      const noRecentShort = !openPositions.some(p => p.direction === 'SHORT' && i - p.entryIndex < 10);
+
+      // LONG: EMA9 crosses above EMA21 (within 3 candles), uptrend, RSI ok, volume ok
       if (
-        prevEma9 <= prevEma21
-        && ema9[i] > ema21[i]
+        recentCrossUp
+        && noRecentLong
         && isUptrend
         && rsiNotOverbought
         && volumeOk
@@ -459,10 +477,10 @@ function runClientBacktest(
         }
       }
 
-      // SHORT: EMA9 crosses below EMA21, downtrend, RSI ok, volume ok
+      // SHORT: EMA9 crosses below EMA21 (within 3 candles), downtrend, RSI ok, volume ok
       if (
-        prevEma9 >= prevEma21
-        && ema9[i] < ema21[i]
+        recentCrossDown
+        && noRecentShort
         && isDowntrend
         && rsiNotOversold
         && volumeOk
@@ -487,10 +505,10 @@ function runClientBacktest(
 
     // ── Strategy: RSI Mean Reversion ──
     if (config.strategy === 'rsi-reversion') {
-      // LONG: RSI crosses above 30 (from below), uptrend filter, volume ok
+      // LONG: RSI crosses above 30 (from below) or RSI < 35 and turning up, uptrend filter, volume ok
+      const rsiTurningUp = rsi[i] > rsi[i - 1] && rsi[i - 1] <= rsi[i - 2];
       if (
-        rsi[i - 1] < 30 && rsi[i] >= 30
-        && isUptrend
+        ((rsi[i - 1] < 30 && rsi[i] >= 30) || (rsi[i] < 35 && rsiTurningUp))
         && volumeOk
         && canOpenLong
       ) {
@@ -510,10 +528,10 @@ function runClientBacktest(
         }
       }
 
-      // SHORT: RSI crosses below 70 (from above), downtrend filter, volume ok
+      // SHORT: RSI crosses below 70 (from above) or RSI > 65 and turning down, downtrend filter, volume ok
+      const rsiTurningDown = rsi[i] < rsi[i - 1] && rsi[i - 1] >= rsi[i - 2];
       if (
-        rsi[i - 1] > 70 && rsi[i] <= 70
-        && isDowntrend
+        ((rsi[i - 1] > 70 && rsi[i] <= 70) || (rsi[i] > 65 && rsiTurningDown))
         && volumeOk
         && canOpenShort
       ) {
@@ -632,8 +650,6 @@ function runClientBacktest(
   const maxDDPercent = maxDrawdown;
   const rawSummary = {
     totalTrades: trades.length,
-    wins,
-    losses,
     winRate: trades.length > 0 ? (wins / trades.length) * 100 : 0,
     profitFactor: grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? 999 : 0,
     maxDrawdownPercent: maxDDPercent,
