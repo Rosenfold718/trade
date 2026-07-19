@@ -1,6 +1,718 @@
 {
   "thoughts": [
     {
+      "id": "thought_1784442612528_6lbj",
+      "timestamp": 1784442612528,
+      "type": "decision",
+      "title": "Нет подходящих сигналов",
+      "detail": "Из 0 ни один не прошёл фильтры.",
+      "emotion": "cautious",
+      "tags": [
+        "no_signals"
+      ]
+    },
+    {
+      "id": "thought_1784442612182_k9mv",
+      "timestamp": 1784442612182,
+      "type": "scan",
+      "title": "Скан: 0 сигналов (0 LONG, 0 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "cautious",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784442566239_t89m",
+      "timestamp": 1784442566239,
+      "type": "decision",
+      "title": "Нет подходящих сигналов",
+      "detail": "Из 0 ни один не прошёл фильтры.",
+      "emotion": "cautious",
+      "tags": [
+        "no_signals"
+      ]
+    },
+    {
+      "id": "thought_1784442565917_pd5u",
+      "timestamp": 1784442565917,
+      "type": "scan",
+      "title": "Скан: 0 сигналов (0 LONG, 0 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "cautious",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784442507575_1tk8",
+      "timestamp": 1784442507575,
+      "type": "decision",
+      "title": "Нет подходящих сигналов",
+      "detail": "Из 0 ни один не прошёл фильтры.",
+      "emotion": "cautious",
+      "tags": [
+        "no_signals"
+      ]
+    },
+    {
+      "id": "thought_1784442507231_4s0p",
+      "timestamp": 1784442507231,
+      "type": "scan",
+      "title": "Скан: 0 сигналов (0 LONG, 0 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "cautious",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784442446234_9kuo",
+      "timestamp": 1784442446234,
+      "type": "decision",
+      "title": "Нет подходящих сигналов",
+      "detail": "Из 0 ни один не прошёл фильтры.",
+      "emotion": "cautious",
+      "tags": [
+        "no_signals"
+      ]
+    },
+    {
+      "id": "thought_1784442445896_6pzj",
+      "timestamp": 1784442445896,
+      "type": "scan",
+      "title": "Скан: 0 сигналов (0 LONG, 0 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "cautious",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784442386417_sty2",
+      "timestamp": 1784442386417,
+      "type": "decision",
+      "title": "Нет подходящих сигналов",
+      "detail": "Из 0 ни один не прошёл фильтры.",
+      "emotion": "cautious",
+      "tags": [
+        "no_signals"
+      ]
+    },
+    {
+      "id": "thought_1784442386039_ns1j",
+      "timestamp": 1784442386039,
+      "type": "scan",
+      "title": "Скан: 0 сигналов (0 LONG, 0 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "cautious",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784442326370_x3e5",
+      "timestamp": 1784442326370,
+      "type": "decision",
+      "title": "Нет подходящих сигналов",
+      "detail": "Из 0 ни один не прошёл фильтры.",
+      "emotion": "cautious",
+      "tags": [
+        "no_signals"
+      ]
+    },
+    {
+      "id": "thought_1784442326007_66ab",
+      "timestamp": 1784442326007,
+      "type": "scan",
+      "title": "Скан: 0 сигналов (0 LONG, 0 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "cautious",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784442267863_4cjx",
+      "timestamp": 1784442267863,
+      "type": "scan",
+      "title": "Скан рынка не удался",
+      "detail": "Не удалось получить данные сканера.",
+      "emotion": "worried",
+      "tags": [
+        "error",
+        "scan"
+      ]
+    },
+    {
+      "id": "thought_1784442206246_wd4e",
+      "timestamp": 1784442206246,
+      "type": "decision",
+      "title": "Нет подходящих сигналов",
+      "detail": "Из 0 ни один не прошёл фильтры.",
+      "emotion": "cautious",
+      "tags": [
+        "no_signals"
+      ]
+    },
+    {
+      "id": "thought_1784442205924_ezrk",
+      "timestamp": 1784442205924,
+      "type": "scan",
+      "title": "Скан: 0 сигналов (0 LONG, 0 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "cautious",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784442146394_xpnn",
+      "timestamp": 1784442146394,
+      "type": "decision",
+      "title": "Нет подходящих сигналов",
+      "detail": "Из 0 ни один не прошёл фильтры.",
+      "emotion": "cautious",
+      "tags": [
+        "no_signals"
+      ]
+    },
+    {
+      "id": "thought_1784442146031_fp5n",
+      "timestamp": 1784442146031,
+      "type": "scan",
+      "title": "Скан: 0 сигналов (0 LONG, 0 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "cautious",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784442086559_y9wv",
+      "timestamp": 1784442086559,
+      "type": "decision",
+      "title": "Нет подходящих сигналов",
+      "detail": "Из 0 ни один не прошёл фильтры.",
+      "emotion": "cautious",
+      "tags": [
+        "no_signals"
+      ]
+    },
+    {
+      "id": "thought_1784442086205_qng5",
+      "timestamp": 1784442086205,
+      "type": "scan",
+      "title": "Скан: 0 сигналов (0 LONG, 0 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "cautious",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784442026280_rj0s",
+      "timestamp": 1784442026280,
+      "type": "decision",
+      "title": "Нет подходящих сигналов",
+      "detail": "Из 0 ни один не прошёл фильтры.",
+      "emotion": "cautious",
+      "tags": [
+        "no_signals"
+      ]
+    },
+    {
+      "id": "thought_1784442025952_93xi",
+      "timestamp": 1784442025952,
+      "type": "scan",
+      "title": "Скан: 0 сигналов (0 LONG, 0 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "cautious",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784441966221_xm6q",
+      "timestamp": 1784441966221,
+      "type": "decision",
+      "title": "Нет подходящих сигналов",
+      "detail": "Из 0 ни один не прошёл фильтры.",
+      "emotion": "cautious",
+      "tags": [
+        "no_signals"
+      ]
+    },
+    {
+      "id": "thought_1784441965907_42r4",
+      "timestamp": 1784441965907,
+      "type": "scan",
+      "title": "Скан: 0 сигналов (0 LONG, 0 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "cautious",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784441908512_pqdq",
+      "timestamp": 1784441908512,
+      "type": "scan",
+      "title": "Скан рынка не удался",
+      "detail": "Не удалось получить данные сканера.",
+      "emotion": "worried",
+      "tags": [
+        "error",
+        "scan"
+      ]
+    },
+    {
+      "id": "thought_1784441846212_avvt",
+      "timestamp": 1784441846212,
+      "type": "decision",
+      "title": "Нет подходящих сигналов",
+      "detail": "Из 0 ни один не прошёл фильтры.",
+      "emotion": "cautious",
+      "tags": [
+        "no_signals"
+      ]
+    },
+    {
+      "id": "thought_1784441845892_247n",
+      "timestamp": 1784441845892,
+      "type": "scan",
+      "title": "Скан: 0 сигналов (0 LONG, 0 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "cautious",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784441786260_ssj4",
+      "timestamp": 1784441786260,
+      "type": "decision",
+      "title": "Нет подходящих сигналов",
+      "detail": "Из 0 ни один не прошёл фильтры.",
+      "emotion": "cautious",
+      "tags": [
+        "no_signals"
+      ]
+    },
+    {
+      "id": "thought_1784441785930_a87i",
+      "timestamp": 1784441785930,
+      "type": "scan",
+      "title": "Скан: 0 сигналов (0 LONG, 0 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "cautious",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784441727759_8wj3",
+      "timestamp": 1784441727759,
+      "type": "decision",
+      "title": "Нет подходящих сигналов",
+      "detail": "Из 0 ни один не прошёл фильтры.",
+      "emotion": "cautious",
+      "tags": [
+        "no_signals"
+      ]
+    },
+    {
+      "id": "thought_1784441727398_tmzu",
+      "timestamp": 1784441727398,
+      "type": "scan",
+      "title": "Скан: 0 сигналов (0 LONG, 0 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "cautious",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784441695058_ako5",
+      "timestamp": 1784441695058,
+      "type": "decision",
+      "title": "Нет подходящих сигналов",
+      "detail": "Из 0 ни один не прошёл фильтры.",
+      "emotion": "cautious",
+      "tags": [
+        "no_signals"
+      ]
+    },
+    {
+      "id": "thought_1784441694729_47ri",
+      "timestamp": 1784441694729,
+      "type": "scan",
+      "title": "Скан: 0 сигналов (0 LONG, 0 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "cautious",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784441635659_v6by",
+      "timestamp": 1784441635659,
+      "type": "decision",
+      "title": "Нет подходящих сигналов",
+      "detail": "Из 0 ни один не прошёл фильтры.",
+      "emotion": "cautious",
+      "tags": [
+        "no_signals"
+      ]
+    },
+    {
+      "id": "thought_1784441635296_nn12",
+      "timestamp": 1784441635296,
+      "type": "scan",
+      "title": "Скан: 0 сигналов (0 LONG, 0 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "cautious",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784441575276_xcu3",
+      "timestamp": 1784441575276,
+      "type": "decision",
+      "title": "Нет подходящих сигналов",
+      "detail": "Из 0 ни один не прошёл фильтры.",
+      "emotion": "cautious",
+      "tags": [
+        "no_signals"
+      ]
+    },
+    {
+      "id": "thought_1784441574911_fixa",
+      "timestamp": 1784441574911,
+      "type": "scan",
+      "title": "Скан: 0 сигналов (0 LONG, 0 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "cautious",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784441515131_74co",
+      "timestamp": 1784441515131,
+      "type": "decision",
+      "title": "Нет подходящих сигналов",
+      "detail": "Из 0 ни один не прошёл фильтры.",
+      "emotion": "cautious",
+      "tags": [
+        "no_signals"
+      ]
+    },
+    {
+      "id": "thought_1784441514806_oqmv",
+      "timestamp": 1784441514806,
+      "type": "scan",
+      "title": "Скан: 0 сигналов (0 LONG, 0 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "cautious",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784441455460_yj90",
+      "timestamp": 1784441455460,
+      "type": "scan",
+      "title": "Скан: 24 сигналов (8 LONG, 16 SHORT)",
+      "detail": "Рынок: Медвежий. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "analytical",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784441394761_ap45",
+      "timestamp": 1784441394761,
+      "type": "scan",
+      "title": "Скан: 24 сигналов (8 LONG, 16 SHORT)",
+      "detail": "Рынок: Медвежий. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "analytical",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784441334794_t9yl",
+      "timestamp": 1784441334794,
+      "type": "scan",
+      "title": "Скан: 24 сигналов (8 LONG, 16 SHORT)",
+      "detail": "Рынок: Медвежий. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "analytical",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784441277966_dvlg",
+      "timestamp": 1784441277966,
+      "type": "observation",
+      "title": "Цикл: открыто 1",
+      "detail": "Рынок: Медвежий",
+      "emotion": "satisfied",
+      "tags": [
+        "cycle_summary"
+      ]
+    },
+    {
+      "id": "thought_1784441276878_49ce",
+      "timestamp": 1784441276879,
+      "type": "decision",
+      "title": "ОТКРЫТА: ETH LONG",
+      "detail": "ЛИМИТ conf:65% R:R:2.50",
+      "coinSymbol": "ETH",
+      "coinId": "ethereum",
+      "direction": "LONG",
+      "confidence": 65,
+      "score": 64.893,
+      "tradeId": "trade_1784441276539_2qzgf1",
+      "entryType": "LIMIT",
+      "emotion": "analytical",
+      "tags": [
+        "open_position"
+      ]
+    },
+    {
+      "id": "thought_1784441275453_4t1k",
+      "timestamp": 1784441275453,
+      "type": "scan",
+      "title": "Скан: 24 сигналов (8 LONG, 16 SHORT)",
+      "detail": "Рынок: Медвежий. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "analytical",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784441214799_kzht",
+      "timestamp": 1784441214799,
+      "type": "scan",
+      "title": "Скан: 24 сигналов (8 LONG, 16 SHORT)",
+      "detail": "Рынок: Медвежий. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "analytical",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784441155634_da6p",
+      "timestamp": 1784441155635,
+      "type": "scan",
+      "title": "Скан: 24 сигналов (8 LONG, 16 SHORT)",
+      "detail": "Рынок: Медвежий. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "analytical",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784441095083_do36",
+      "timestamp": 1784441095083,
+      "type": "scan",
+      "title": "Скан: 23 сигналов (9 LONG, 14 SHORT)",
+      "detail": "Рынок: Медвежий. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "analytical",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784441034854_2v9n",
+      "timestamp": 1784441034854,
+      "type": "scan",
+      "title": "Скан: 23 сигналов (9 LONG, 14 SHORT)",
+      "detail": "Рынок: Медвежий. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "analytical",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784440974683_7bcb",
+      "timestamp": 1784440974683,
+      "type": "scan",
+      "title": "Скан: 23 сигналов (9 LONG, 14 SHORT)",
+      "detail": "Рынок: Медвежий. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "analytical",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784440916522_vfqn",
+      "timestamp": 1784440916522,
+      "type": "scan",
+      "title": "Скан: 23 сигналов (9 LONG, 14 SHORT)",
+      "detail": "Рынок: Медвежий. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "analytical",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784440854865_r7bq",
+      "timestamp": 1784440854865,
+      "type": "scan",
+      "title": "Скан: 23 сигналов (9 LONG, 14 SHORT)",
+      "detail": "Рынок: Медвежий. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "analytical",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784440795754_d3e4",
+      "timestamp": 1784440795754,
+      "type": "scan",
+      "title": "Скан: 23 сигналов (9 LONG, 14 SHORT)",
+      "detail": "Рынок: Медвежий. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "analytical",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784440735387_qxn9",
+      "timestamp": 1784440735388,
+      "type": "scan",
+      "title": "Скан: 25 сигналов (13 LONG, 12 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "analytical",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784440674783_s80g",
+      "timestamp": 1784440674783,
+      "type": "scan",
+      "title": "Скан: 25 сигналов (13 LONG, 12 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "analytical",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784440614822_mcom",
+      "timestamp": 1784440614822,
+      "type": "scan",
+      "title": "Скан: 25 сигналов (13 LONG, 12 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "analytical",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784440555213_ds82",
+      "timestamp": 1784440555213,
+      "type": "scan",
+      "title": "Скан: 25 сигналов (13 LONG, 12 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "analytical",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784440540432_l1sf",
+      "timestamp": 1784440540432,
+      "type": "scan",
+      "title": "Скан: 25 сигналов (13 LONG, 12 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $76.00. Открытых: 1/5.",
+      "emotion": "analytical",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
+      "id": "thought_1784440485867_okr8",
+      "timestamp": 1784440485868,
+      "type": "observation",
+      "title": "Цикл: открыто 1",
+      "detail": "Рынок: Нейтральный",
+      "emotion": "satisfied",
+      "tags": [
+        "cycle_summary"
+      ]
+    },
+    {
+      "id": "thought_1784440483428_j8e4",
+      "timestamp": 1784440483428,
+      "type": "decision",
+      "title": "ОТКРЫТА: ETH LONG",
+      "detail": "ЛИМИТ conf:65% R:R:2.50",
+      "coinSymbol": "ETH",
+      "coinId": "ethereum",
+      "direction": "LONG",
+      "confidence": 65,
+      "score": 72.863,
+      "tradeId": "trade_1784440483099_jofwz3",
+      "entryType": "LIMIT",
+      "emotion": "analytical",
+      "tags": [
+        "open_position"
+      ]
+    },
+    {
+      "id": "thought_1784440482755_1x14",
+      "timestamp": 1784440482755,
+      "type": "scan",
+      "title": "Скан: 25 сигналов (13 LONG, 12 SHORT)",
+      "detail": "Рынок: Нейтральный. Свободных: $100.00. Открытых: 0/5.",
+      "emotion": "analytical",
+      "tags": [
+        "scan",
+        "market_analysis"
+      ]
+    },
+    {
       "id": "thought_1784403555943_ss84",
       "timestamp": 1784403555943,
       "type": "decision",
@@ -1717,665 +2429,13 @@
         "cycle_summary",
         "all_rejected"
       ]
-    },
-    {
-      "id": "thought_1784393337984_w1kb",
-      "timestamp": 1784393337984,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (11 LONG, 14 SHORT)",
-      "detail": "Рынок: Нейтральный. Свободных средств: $43.90. Открытых позиций: 3/5. Лучший сигнал: INJ (86 очков, LONG)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
-    },
-    {
-      "id": "thought_1784393279486_qe4w",
-      "timestamp": 1784393279486,
-      "type": "observation",
-      "title": "Цикл завершён: все сигналы отклонены",
-      "detail": "Причины: INJ(insufficient_margin); ARB(already_open); LTC(already_open); PEPE(insufficient_margin). Жду следующий цикл.",
-      "emotion": "cautious",
-      "tags": [
-        "cycle_summary",
-        "all_rejected"
-      ]
-    },
-    {
-      "id": "thought_1784393277748_oktn",
-      "timestamp": 1784393277748,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (11 LONG, 14 SHORT)",
-      "detail": "Рынок: Нейтральный. Свободных средств: $43.90. Открытых позиций: 3/5. Лучший сигнал: INJ (86 очков, LONG)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
-    },
-    {
-      "id": "thought_1784393219416_udkd",
-      "timestamp": 1784393219416,
-      "type": "observation",
-      "title": "Цикл завершён: все сигналы отклонены",
-      "detail": "Причины: INJ(insufficient_margin); ARB(already_open); LTC(already_open); PEPE(insufficient_margin). Жду следующий цикл.",
-      "emotion": "cautious",
-      "tags": [
-        "cycle_summary",
-        "all_rejected"
-      ]
-    },
-    {
-      "id": "thought_1784393217677_405q",
-      "timestamp": 1784393217677,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (11 LONG, 14 SHORT)",
-      "detail": "Рынок: Нейтральный. Свободных средств: $43.90. Открытых позиций: 3/5. Лучший сигнал: INJ (86 очков, LONG)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
-    },
-    {
-      "id": "thought_1784393174919_3nug",
-      "timestamp": 1784393174919,
-      "type": "observation",
-      "title": "Цикл завершён: все сигналы отклонены",
-      "detail": "Причины: INJ(insufficient_margin); ARB(already_open); LTC(already_open); PEPE(insufficient_margin). Жду следующий цикл.",
-      "emotion": "cautious",
-      "tags": [
-        "cycle_summary",
-        "all_rejected"
-      ]
-    },
-    {
-      "id": "thought_1784393173053_7ygu",
-      "timestamp": 1784393173053,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (11 LONG, 14 SHORT)",
-      "detail": "Рынок: Нейтральный. Свободных средств: $43.90. Открытых позиций: 3/5. Лучший сигнал: INJ (86 очков, LONG)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
-    },
-    {
-      "id": "thought_1784393099703_smot",
-      "timestamp": 1784393099703,
-      "type": "observation",
-      "title": "Цикл завершён: все сигналы отклонены",
-      "detail": "Причины: LTC(already_open); NEAR(already_open); ARB(already_open); DOGE(insufficient_margin). Жду следующий цикл.",
-      "emotion": "cautious",
-      "tags": [
-        "cycle_summary",
-        "all_rejected"
-      ]
-    },
-    {
-      "id": "thought_1784393097977_jayr",
-      "timestamp": 1784393097977,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (11 LONG, 14 SHORT)",
-      "detail": "Рынок: Нейтральный. Свободных средств: $43.90. Открытых позиций: 3/5. Лучший сигнал: LTC (84 очков, LONG)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
-    },
-    {
-      "id": "thought_1784393052496_un95",
-      "timestamp": 1784393052496,
-      "type": "observation",
-      "title": "Цикл завершён: все сигналы отклонены",
-      "detail": "Причины: LTC(already_open); NEAR(already_open); ARB(already_open); DOGE(insufficient_margin). Жду следующий цикл.",
-      "emotion": "cautious",
-      "tags": [
-        "cycle_summary",
-        "all_rejected"
-      ]
-    },
-    {
-      "id": "thought_1784393050667_u6xb",
-      "timestamp": 1784393050667,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (11 LONG, 14 SHORT)",
-      "detail": "Рынок: Нейтральный. Свободных средств: $43.90. Открытых позиций: 3/5. Лучший сигнал: LTC (84 очков, LONG)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
-    },
-    {
-      "id": "thought_1784393023190_iie4",
-      "timestamp": 1784393023190,
-      "type": "observation",
-      "title": "Цикл завершён: все сигналы отклонены",
-      "detail": "Причины: LTC(already_open); NEAR(already_open); ARB(already_open); DOGE(insufficient_margin). Жду следующий цикл.",
-      "emotion": "cautious",
-      "tags": [
-        "cycle_summary",
-        "all_rejected"
-      ]
-    },
-    {
-      "id": "thought_1784393020921_52jn",
-      "timestamp": 1784393020921,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (11 LONG, 14 SHORT)",
-      "detail": "Рынок: Нейтральный. Свободных средств: $43.90. Открытых позиций: 3/5. Лучший сигнал: LTC (84 очков, LONG)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
-    },
-    {
-      "id": "thought_1784392962435_e236",
-      "timestamp": 1784392962435,
-      "type": "observation",
-      "title": "Цикл завершён: все сигналы отклонены",
-      "detail": "Причины: LTC(already_open); NEAR(already_open); ARB(already_open); DOGE(insufficient_margin). Жду следующий цикл.",
-      "emotion": "cautious",
-      "tags": [
-        "cycle_summary",
-        "all_rejected"
-      ]
-    },
-    {
-      "id": "thought_1784392960710_kokm",
-      "timestamp": 1784392960710,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (11 LONG, 14 SHORT)",
-      "detail": "Рынок: Нейтральный. Свободных средств: $43.90. Открытых позиций: 3/5. Лучший сигнал: LTC (84 очков, LONG)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
-    },
-    {
-      "id": "thought_1784392903312_yshy",
-      "timestamp": 1784392903312,
-      "type": "observation",
-      "title": "Цикл завершён: открыто 1 позиций",
-      "detail": "Открыты: LTC. Отклонены: NEAR(already_open), ARB(already_open), DOGE(insufficient_margin), SUI(insufficient_margin). Рынок: Нейтральный. Свободных средств осталось ~$50.83",
-      "emotion": "satisfied",
-      "tags": [
-        "cycle_summary",
-        "1_opened"
-      ]
-    },
-    {
-      "id": "thought_1784392901471_ynqm",
-      "timestamp": 1784392901471,
-      "type": "decision",
-      "title": "ОТКРЫТА позиция: LTC LONG",
-      "detail": "ЛИМИТНЫЙ вход на $46.45. Confidence: 71%, Score: 84, R:R: 2.50. SL: $45.15, TP1: $46.29. Причина: Откат к EMA21 — динамическая поддержка",
-      "coinSymbol": "LTC",
-      "coinId": "litecoin",
-      "direction": "LONG",
-      "confidence": 71,
-      "score": 83.578,
-      "tradeId": "trade_1784392901111_bmntuz",
-      "entryType": "LIMIT",
-      "emotion": "analytical",
-      "tags": [
-        "open_position",
-        "long",
-        "limit"
-      ]
-    },
-    {
-      "id": "thought_1784392900767_qveg",
-      "timestamp": 1784392900767,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (11 LONG, 14 SHORT)",
-      "detail": "Рынок: Нейтральный. Свободных средств: $57.76. Открытых позиций: 2/5. Лучший сигнал: LTC (84 очков, LONG)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
-    },
-    {
-      "id": "thought_1784392844459_ln9i",
-      "timestamp": 1784392844459,
-      "type": "observation",
-      "title": "Цикл завершён: открыто 2 позиций",
-      "detail": "Открыты: NEAR, ARB. Отклонены: LTC(insufficient_margin). Рынок: Нейтральный. Свободных средств осталось ~$33.36",
-      "emotion": "confident",
-      "tags": [
-        "cycle_summary",
-        "2_opened"
-      ]
-    },
-    {
-      "id": "thought_1784392844097_6jjs",
-      "timestamp": 1784392844097,
-      "type": "decision",
-      "title": "ОТКРЫТА позиция: ARB SHORT",
-      "detail": "РЫНОЧНЫЙ вход на $0.09. Confidence: 76%, Score: 82, R:R: 2.50. SL: $0.09, TP1: $0.09. Причина: Откат к EMA21 — динамическое сопротивление",
-      "coinSymbol": "ARB",
-      "coinId": "arbitrum",
-      "direction": "SHORT",
-      "confidence": 76,
-      "score": 81.9105,
-      "tradeId": "trade_1784392843714_blyxm1",
-      "entryType": "MARKET",
-      "emotion": "confident",
-      "tags": [
-        "open_position",
-        "short",
-        "market"
-      ]
-    },
-    {
-      "id": "thought_1784392843379_11ne",
-      "timestamp": 1784392843379,
-      "type": "decision",
-      "title": "ОТКРЫТА позиция: NEAR SHORT",
-      "detail": "РЫНОЧНЫЙ вход на $1.91. Confidence: 79%, Score: 82, R:R: 2.50. SL: $1.94, TP1: $1.89. Причина: Откат к EMA21 — динамическое сопротивление",
-      "coinSymbol": "NEAR",
-      "coinId": "near",
-      "direction": "SHORT",
-      "confidence": 79,
-      "score": 82.22399999999999,
-      "tradeId": "trade_1784392843034_35sqm3",
-      "entryType": "MARKET",
-      "emotion": "confident",
-      "tags": [
-        "open_position",
-        "short",
-        "market"
-      ]
-    },
-    {
-      "id": "thought_1784392842361_4n0k",
-      "timestamp": 1784392842361,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (11 LONG, 14 SHORT)",
-      "detail": "Рынок: Нейтральный. Свободных средств: $43.90. Открытых позиций: 3/5. Лучший сигнал: LTC (84 очков, LONG)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
-    },
-    {
-      "id": "thought_1784392782695_fc0v",
-      "timestamp": 1784392782695,
-      "type": "observation",
-      "title": "Цикл завершён: все сигналы отклонены",
-      "detail": "Причины: LTC(insufficient_margin); DOT(already_open); SUI(already_open); DOGE(insufficient_margin). Жду следующий цикл.",
-      "emotion": "cautious",
-      "tags": [
-        "cycle_summary",
-        "all_rejected"
-      ]
-    },
-    {
-      "id": "thought_1784392780819_p04d",
-      "timestamp": 1784392780819,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (13 LONG, 12 SHORT)",
-      "detail": "Рынок: Нейтральный. Свободных средств: $43.90. Открытых позиций: 3/5. Лучший сигнал: LTC (83 очков, LONG)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
-    },
-    {
-      "id": "thought_1784392722627_wvis",
-      "timestamp": 1784392722627,
-      "type": "observation",
-      "title": "Цикл завершён: все сигналы отклонены",
-      "detail": "Причины: LTC(insufficient_margin); DOT(already_open); SUI(already_open); DOGE(insufficient_margin). Жду следующий цикл.",
-      "emotion": "cautious",
-      "tags": [
-        "cycle_summary",
-        "all_rejected"
-      ]
-    },
-    {
-      "id": "thought_1784392720742_ygfa",
-      "timestamp": 1784392720742,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (13 LONG, 12 SHORT)",
-      "detail": "Рынок: Нейтральный. Свободных средств: $43.90. Открытых позиций: 3/5. Лучший сигнал: LTC (83 очков, LONG)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
-    },
-    {
-      "id": "thought_1784392662322_0y45",
-      "timestamp": 1784392662322,
-      "type": "observation",
-      "title": "Цикл завершён: все сигналы отклонены",
-      "detail": "Причины: LTC(insufficient_margin); DOT(already_open); SUI(already_open); DOGE(insufficient_margin). Жду следующий цикл.",
-      "emotion": "cautious",
-      "tags": [
-        "cycle_summary",
-        "all_rejected"
-      ]
-    },
-    {
-      "id": "thought_1784392660649_40k5",
-      "timestamp": 1784392660649,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (13 LONG, 12 SHORT)",
-      "detail": "Рынок: Нейтральный. Свободных средств: $43.90. Открытых позиций: 3/5. Лучший сигнал: LTC (83 очков, LONG)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
-    },
-    {
-      "id": "thought_1784392559605_lmip",
-      "timestamp": 1784392559605,
-      "type": "observation",
-      "title": "Цикл завершён: все сигналы отклонены",
-      "detail": "Причины: LTC(insufficient_margin); DOT(already_open); SUI(already_open); DOGE(insufficient_margin). Жду следующий цикл.",
-      "emotion": "cautious",
-      "tags": [
-        "cycle_summary",
-        "all_rejected"
-      ]
-    },
-    {
-      "id": "thought_1784392557872_hoc0",
-      "timestamp": 1784392557872,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (13 LONG, 12 SHORT)",
-      "detail": "Рынок: Нейтральный. Свободных средств: $43.90. Открытых позиций: 3/5. Лучший сигнал: LTC (83 очков, LONG)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
-    },
-    {
-      "id": "thought_1784392501403_fqf0",
-      "timestamp": 1784392501403,
-      "type": "observation",
-      "title": "Цикл завершён: открыто 2 позиций",
-      "detail": "Открыты: DOT, SUI. Отклонены: LTC(insufficient_margin). Рынок: Нейтральный. Свободных средств осталось ~$33.36",
-      "emotion": "confident",
-      "tags": [
-        "cycle_summary",
-        "2_opened"
-      ]
-    },
-    {
-      "id": "thought_1784392501040_5wu4",
-      "timestamp": 1784392501040,
-      "type": "decision",
-      "title": "ОТКРЫТА позиция: SUI SHORT",
-      "detail": "РЫНОЧНЫЙ вход на $0.74. Confidence: 62%, Score: 67, R:R: 2.50. SL: $0.74, TP1: $0.73. Причина: Откат к EMA21 — динамическое сопротивление",
-      "coinSymbol": "SUI",
-      "coinId": "sui",
-      "direction": "SHORT",
-      "confidence": 62,
-      "score": 67.22749999999999,
-      "tradeId": "trade_1784392500648_2yor1h",
-      "entryType": "MARKET",
-      "emotion": "analytical",
-      "tags": [
-        "open_position",
-        "short",
-        "market"
-      ]
-    },
-    {
-      "id": "thought_1784392500320_iach",
-      "timestamp": 1784392500320,
-      "type": "decision",
-      "title": "ОТКРЫТА позиция: DOT SHORT",
-      "detail": "РЫНОЧНЫЙ вход на $0.83. Confidence: 78%, Score: 78, R:R: 2.50. SL: $0.85, TP1: $0.83. Причина: Откат к EMA21 — динамическое сопротивление",
-      "coinSymbol": "DOT",
-      "coinId": "polkadot",
-      "direction": "SHORT",
-      "confidence": 78,
-      "score": 78.25800000000001,
-      "tradeId": "trade_1784392500003_vk3b1o",
-      "entryType": "MARKET",
-      "emotion": "confident",
-      "tags": [
-        "open_position",
-        "short",
-        "market"
-      ]
-    },
-    {
-      "id": "thought_1784392499176_7qnw",
-      "timestamp": 1784392499176,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (13 LONG, 12 SHORT)",
-      "detail": "Рынок: Нейтральный. Свободных средств: $43.90. Открытых позиций: 3/5. Лучший сигнал: LTC (83 очков, LONG)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
-    },
-    {
-      "id": "thought_1784392438784_58hb",
-      "timestamp": 1784392438784,
-      "type": "observation",
-      "title": "Цикл завершён: все сигналы отклонены",
-      "detail": "Причины: ARB(already_open); PEPE(already_open); DOGE(already_open); SUI(insufficient_margin). Жду следующий цикл.",
-      "emotion": "cautious",
-      "tags": [
-        "cycle_summary",
-        "all_rejected"
-      ]
-    },
-    {
-      "id": "thought_1784392436961_o0sy",
-      "timestamp": 1784392436961,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (8 LONG, 17 SHORT)",
-      "detail": "Рынок: Медвежий. Свободных средств: $43.90. Открытых позиций: 3/5. Лучший сигнал: ARB (82 очков, SHORT)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
-    },
-    {
-      "id": "thought_1784392381467_ymcw",
-      "timestamp": 1784392381467,
-      "type": "observation",
-      "title": "Цикл завершён: все сигналы отклонены",
-      "detail": "Причины: ARB(already_open); PEPE(already_open); DOGE(already_open); SUI(insufficient_margin). Жду следующий цикл.",
-      "emotion": "cautious",
-      "tags": [
-        "cycle_summary",
-        "all_rejected"
-      ]
-    },
-    {
-      "id": "thought_1784392378972_zzmt",
-      "timestamp": 1784392378972,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (8 LONG, 17 SHORT)",
-      "detail": "Рынок: Медвежий. Свободных средств: $43.90. Открытых позиций: 3/5. Лучший сигнал: ARB (82 очков, SHORT)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
-    },
-    {
-      "id": "thought_1784392319662_8j5o",
-      "timestamp": 1784392319662,
-      "type": "observation",
-      "title": "Цикл завершён: все сигналы отклонены",
-      "detail": "Причины: ARB(already_open); PEPE(already_open); DOGE(already_open); SUI(insufficient_margin). Жду следующий цикл.",
-      "emotion": "cautious",
-      "tags": [
-        "cycle_summary",
-        "all_rejected"
-      ]
-    },
-    {
-      "id": "thought_1784392317790_bfbx",
-      "timestamp": 1784392317790,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (8 LONG, 17 SHORT)",
-      "detail": "Рынок: Медвежий. Свободных средств: $43.90. Открытых позиций: 3/5. Лучший сигнал: ARB (82 очков, SHORT)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
-    },
-    {
-      "id": "thought_1784392259426_8dww",
-      "timestamp": 1784392259426,
-      "type": "observation",
-      "title": "Цикл завершён: все сигналы отклонены",
-      "detail": "Причины: ARB(already_open); PEPE(already_open); DOGE(already_open); SUI(insufficient_margin). Жду следующий цикл.",
-      "emotion": "cautious",
-      "tags": [
-        "cycle_summary",
-        "all_rejected"
-      ]
-    },
-    {
-      "id": "thought_1784392257681_rwrj",
-      "timestamp": 1784392257681,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (8 LONG, 17 SHORT)",
-      "detail": "Рынок: Медвежий. Свободных средств: $43.90. Открытых позиций: 3/5. Лучший сигнал: ARB (82 очков, SHORT)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
-    },
-    {
-      "id": "thought_1784392198868_tze6",
-      "timestamp": 1784392198868,
-      "type": "observation",
-      "title": "Цикл завершён: все сигналы отклонены",
-      "detail": "Причины: ARB(already_open); PEPE(already_open); DOGE(already_open); SUI(insufficient_margin). Жду следующий цикл.",
-      "emotion": "cautious",
-      "tags": [
-        "cycle_summary",
-        "all_rejected"
-      ]
-    },
-    {
-      "id": "thought_1784392197186_1plu",
-      "timestamp": 1784392197186,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (8 LONG, 17 SHORT)",
-      "detail": "Рынок: Медвежий. Свободных средств: $43.90. Открытых позиций: 3/5. Лучший сигнал: ARB (82 очков, SHORT)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
-    },
-    {
-      "id": "thought_1784392144010_zs74",
-      "timestamp": 1784392144010,
-      "type": "observation",
-      "title": "Цикл завершён: открыто 3 позиций",
-      "detail": "Открыты: ARB, PEPE, DOGE. . Рынок: Медвежий. Свободных средств осталось ~$64.00",
-      "emotion": "confident",
-      "tags": [
-        "cycle_summary",
-        "3_opened"
-      ]
-    },
-    {
-      "id": "thought_1784392143653_a0d2",
-      "timestamp": 1784392143653,
-      "type": "decision",
-      "title": "ОТКРЫТА позиция: DOGE SHORT",
-      "detail": "ЛИМИТНЫЙ вход на $0.07. Confidence: 67%, Score: 69, R:R: 2.50. SL: $0.07, TP1: $0.07. Причина: Откат к EMA21 — динамическое сопротивление",
-      "coinSymbol": "DOGE",
-      "coinId": "dogecoin",
-      "direction": "SHORT",
-      "confidence": 67,
-      "score": 69.256,
-      "tradeId": "trade_1784392143289_dnsrjq",
-      "entryType": "LIMIT",
-      "emotion": "analytical",
-      "tags": [
-        "open_position",
-        "short",
-        "limit"
-      ]
-    },
-    {
-      "id": "thought_1784392142974_d2da",
-      "timestamp": 1784392142974,
-      "type": "decision",
-      "title": "ОТКРЫТА позиция: PEPE SHORT",
-      "detail": "РЫНОЧНЫЙ вход на $0.00. Confidence: 61%, Score: 74, R:R: 2.50. SL: $0.00, TP1: $0.00. Причина: Откат к EMA21 — динамическое сопротивление",
-      "coinSymbol": "PEPE",
-      "coinId": "pepe",
-      "direction": "SHORT",
-      "confidence": 61,
-      "score": 74.4,
-      "tradeId": "trade_1784392142605_eeaspu",
-      "entryType": "MARKET",
-      "emotion": "analytical",
-      "tags": [
-        "open_position",
-        "short",
-        "market"
-      ]
-    },
-    {
-      "id": "thought_1784392142245_yz7h",
-      "timestamp": 1784392142245,
-      "type": "decision",
-      "title": "ОТКРЫТА позиция: ARB SHORT",
-      "detail": "РЫНОЧНЫЙ вход на $0.09. Confidence: 76%, Score: 82, R:R: 2.50. SL: $0.09, TP1: $0.09. Причина: Откат к EMA21 — динамическое сопротивление",
-      "coinSymbol": "ARB",
-      "coinId": "arbitrum",
-      "direction": "SHORT",
-      "confidence": 76,
-      "score": 82.40700000000001,
-      "tradeId": "trade_1784392141847_3ojah1",
-      "entryType": "MARKET",
-      "emotion": "confident",
-      "tags": [
-        "open_position",
-        "short",
-        "market"
-      ]
-    },
-    {
-      "id": "thought_1784392141477_gxua",
-      "timestamp": 1784392141477,
-      "type": "scan",
-      "title": "Скан: 25 сигналов (8 LONG, 17 SHORT)",
-      "detail": "Рынок: Медвежий. Свободных средств: $100.00. Открытых позиций: 0/5. Лучший сигнал: ARB (82 очков, SHORT)",
-      "emotion": "analytical",
-      "tags": [
-        "scan",
-        "market_analysis"
-      ]
     }
   ],
   "currentMood": "Анализ рынка",
   "activeStrategy": "Внутридневная торговля с адаптивным входом",
-  "marketView": "Бычий",
-  "lastScanAt": 1784403555326,
+  "marketView": "Нейтральный",
+  "lastScanAt": 1784442612182,
   "openPositionsCount": 1,
-  "freeBalance": 88,
+  "freeBalance": 76,
   "totalEquity": 100
 }

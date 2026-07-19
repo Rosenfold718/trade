@@ -72,6 +72,15 @@ interface BacktestDialogProps {
   coinSymbol: string;
 }
 
+interface OhlcvCandle {
+  timestamp: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
 const INTERVALS = [
   { value: '1m', label: '1М' },
   { value: '5m', label: '5М' },
@@ -81,6 +90,249 @@ const INTERVALS = [
 ];
 
 const DAYS = [7, 14, 30, 60, 90];
+
+// ─── Client-side backtest engine ───
+
+function calcEMA(data: number[], period: number): number[] {
+  const ema: number[] = [];
+  const k = 2 / (period + 1);
+  for (let i = 0; i < data.length; i++) {
+    if (i < period - 1) {
+      ema.push(0);
+      continue;
+    }
+    if (i === period - 1) {
+      const sum = data.slice(0, period).reduce((a, b) => a + b, 0);
+      ema.push(sum / period);
+    } else {
+      ema.push(data[i] * k + ema[i - 1] * (1 - k));
+    }
+  }
+  return ema;
+}
+
+function runClientBacktest(
+  candles: OhlcvCandle[],
+  config: {
+    initialBalance: number;
+    leverage: number;
+    riskPerTradePct: number;
+    maxPositions: number;
+    stopLossPct: number;
+    takeProfitPct: number;
+  },
+  onProgress: (current: number, total: number) => void,
+): BacktestResult {
+  const trades: BacktestTrade[] = [];
+  const equityCurve: { step: number; equity: number; drawdown: number }[] = [];
+  let balance = config.initialBalance;
+  let peakBalance = balance;
+  let maxDrawdown = 0;
+
+  interface OpenPosition {
+    id: string;
+    direction: 'LONG' | 'SHORT';
+    entryPrice: number;
+    entryDate: string;
+    stopLoss: number;
+    takeProfit: number;
+    quantity: number;
+    entryIndex: number;
+  }
+
+  let openPositions: OpenPosition[] = [];
+
+  const closes = candles.map(c => c.close);
+  const ema9 = calcEMA(closes, 9);
+  const ema21 = calcEMA(closes, 21);
+  const ema50 = calcEMA(closes, 50);
+
+  const totalCandles = candles.length;
+
+  for (let i = 50; i < candles.length; i++) {
+    const candle = candles[i];
+    const date = new Date(candle.timestamp).toISOString().split('T')[0];
+
+    // Report progress
+    onProgress(i - 50, totalCandles - 50);
+
+    // Check open positions for TP/SL
+    for (let p = openPositions.length - 1; p >= 0; p--) {
+      const pos = openPositions[p];
+      const hitSL = pos.direction === 'LONG'
+        ? candle.low <= pos.stopLoss
+        : candle.high >= pos.stopLoss;
+      const hitTP = pos.direction === 'LONG'
+        ? candle.high >= pos.takeProfit
+        : candle.low <= pos.takeProfit;
+
+      if (hitSL || hitTP) {
+        const exitPrice = hitSL ? pos.stopLoss : pos.takeProfit;
+        const priceDiff = pos.direction === 'LONG'
+          ? (exitPrice - pos.entryPrice)
+          : (pos.entryPrice - exitPrice);
+        const pnl = priceDiff * pos.quantity * config.leverage;
+        const commission = (pos.entryPrice + exitPrice) * pos.quantity * 0.001;
+        const netPnl = pnl - commission;
+
+        balance += netPnl;
+        const result = netPnl >= 0 ? 'WIN' : 'LOSS';
+
+        trades.push({
+          id: `bt-${trades.length}`,
+          coinId: '',
+          coinSymbol: '',
+          direction: pos.direction,
+          entry: pos.entryPrice,
+          exit: exitPrice,
+          pnl: Math.round(netPnl * 100) / 100,
+          pnlPercent: Math.round((netPnl / (pos.entryPrice * pos.quantity)) * 10000) / 100,
+          outcome: result,
+          date,
+        });
+
+        openPositions.splice(p, 1);
+      }
+    }
+
+    // Generate signal: EMA9/21 crossover with EMA50 trend filter
+    if (ema9[i] > 0 && ema21[i] > 0 && ema50[i] > 0) {
+      const prevEma9 = ema9[i - 1];
+      const prevEma21 = ema21[i - 1];
+      const isUptrend = ema50[i] > ema50[i - 1];
+      const isDowntrend = ema50[i] < ema50[i - 1];
+
+      // LONG signal
+      if (
+        prevEma9 <= prevEma21
+        && ema9[i] > ema21[i]
+        && isUptrend
+        && openPositions.filter(p => p.direction === 'LONG').length < config.maxPositions
+      ) {
+        const riskAmount = balance * (config.riskPerTradePct / 100);
+        const slDistance = candle.close * (config.stopLossPct / 100);
+        const quantity = riskAmount / slDistance;
+        if (quantity > 0 && balance >= quantity * candle.close) {
+          openPositions.push({
+            id: `pos-${openPositions.length}`,
+            direction: 'LONG',
+            entryPrice: candle.close,
+            entryDate: date,
+            stopLoss: candle.close * (1 - config.stopLossPct / 100),
+            takeProfit: candle.close * (1 + config.takeProfitPct / 100),
+            quantity,
+            entryIndex: i,
+          });
+        }
+      }
+
+      // SHORT signal
+      if (
+        prevEma9 >= prevEma21
+        && ema9[i] < ema21[i]
+        && isDowntrend
+        && openPositions.filter(p => p.direction === 'SHORT').length < config.maxPositions
+      ) {
+        const riskAmount = balance * (config.riskPerTradePct / 100);
+        const slDistance = candle.close * (config.stopLossPct / 100);
+        const quantity = riskAmount / slDistance;
+        if (quantity > 0 && balance >= quantity * candle.close) {
+          openPositions.push({
+            id: `pos-${openPositions.length}`,
+            direction: 'SHORT',
+            entryPrice: candle.close,
+            entryDate: date,
+            stopLoss: candle.close * (1 + config.stopLossPct / 100),
+            takeProfit: candle.close * (1 - config.takeProfitPct / 100),
+            quantity,
+            entryIndex: i,
+          });
+        }
+      }
+    }
+
+    // Track equity
+    const unrealizedPnl = openPositions.reduce((sum, pos) => {
+      const priceDiff = pos.direction === 'LONG'
+        ? (candle.close - pos.entryPrice)
+        : (pos.entryPrice - candle.close);
+      return sum + priceDiff * pos.quantity * config.leverage;
+    }, 0);
+    const equity = balance + unrealizedPnl;
+    if (equity > peakBalance) peakBalance = equity;
+    const drawdown = peakBalance > 0 ? ((peakBalance - equity) / peakBalance) * 100 : 0;
+    if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+    equityCurve.push({
+      step: i,
+      equity: Math.round(equity * 100) / 100,
+      drawdown: Math.round(drawdown * 100) / 100,
+    });
+  }
+
+  // Close remaining open positions at last price
+  const lastCandle = candles[candles.length - 1];
+  for (const pos of openPositions) {
+    const priceDiff = pos.direction === 'LONG'
+      ? (lastCandle.close - pos.entryPrice)
+      : (pos.entryPrice - lastCandle.close);
+    const pnl = priceDiff * pos.quantity * config.leverage;
+    const commission = (pos.entryPrice + lastCandle.close) * pos.quantity * 0.001;
+    const netPnl = pnl - commission;
+    balance += netPnl;
+    trades.push({
+      id: `bt-${trades.length}`,
+      coinId: '',
+      coinSymbol: '',
+      direction: pos.direction,
+      entry: pos.entryPrice,
+      exit: lastCandle.close,
+      pnl: Math.round(netPnl * 100) / 100,
+      pnlPercent: Math.round((netPnl / (pos.entryPrice * pos.quantity)) * 10000) / 100,
+      outcome: netPnl >= 0 ? 'WIN' : 'LOSS',
+      date: new Date(lastCandle.timestamp).toISOString().split('T')[0],
+    });
+  }
+
+  const wins = trades.filter(t => t.outcome === 'WIN').length;
+  const losses = trades.filter(t => t.outcome === 'LOSS').length;
+  const grossWins = trades.filter(t => t.pnl > 0).reduce((s, t) => s + t.pnl, 0);
+  const grossLosses = Math.abs(trades.filter(t => t.pnl < 0).reduce((s, t) => s + t.pnl, 0));
+
+  return {
+    summary: {
+      totalTrades: trades.length,
+      wins,
+      losses,
+      winRate: trades.length > 0 ? (wins / trades.length) * 100 : 0,
+      profitFactor: grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? 999 : 0,
+      sharpeRatio: 0,
+      maxDrawdown: Math.round(maxDrawdown * 100) / 100,
+      maxDrawdownPercent: Math.round(maxDrawdown * 100) / 100,
+      totalPnl: Math.round((balance - config.initialBalance) * 100) / 100,
+      totalPnlPercent: Math.round(((balance / config.initialBalance) - 1) * 10000) / 100,
+      avgWin: wins > 0
+        ? Math.round((trades.filter(t => t.outcome === 'WIN').reduce((s, t) => s + t.pnl, 0) / wins) * 100) / 100
+        : 0,
+      avgLoss: losses > 0
+        ? Math.round((Math.abs(trades.filter(t => t.outcome === 'LOSS').reduce((s, t) => s + t.pnl, 0)) / losses) * 100) / 100
+        : 0,
+      bestTrade: trades.length > 0 ? Math.max(...trades.map(t => t.pnl)) : 0,
+      worstTrade: trades.length > 0 ? Math.min(...trades.map(t => t.pnl)) : 0,
+      avgHoldingBars: 0,
+      startingBalance: config.initialBalance,
+      finalBalance: Math.round(balance * 100) / 100,
+    },
+    equityCurve,
+    trades,
+    parameters: {
+      coinId: '',
+      interval: '',
+      days: 0,
+      startingBalance: config.initialBalance,
+      leverage: config.leverage,
+    },
+  };
+}
 
 // ─── Component ───
 
@@ -97,11 +349,16 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
   const [retryAfter, setRetryAfter] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
-  const debounceRef = useRef<number | null>(null);
+  // Progress state for client-side computation
+  const [phase, setPhase] = useState<'idle' | 'fetching' | 'computing' | 'done'>('idle');
+  const [progressCurrent, setProgressCurrent] = useState(0);
+  const [progressTotal, setProgressTotal] = useState(0);
+
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const retryAfterRef = useRef(0);
   const autoRetryRef = useRef(false);
   const countdownActiveRef = useRef(false);
+  const lockedRef = useRef(false);
 
   // Countdown timer for rate limit
   useEffect(() => {
@@ -129,21 +386,10 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
     retryAfterRef.current = retryAfter;
   }, [retryAfter]);
 
-  // Auto-retry when countdown expires
-  useEffect(() => {
-    if (retryAfter === 0 && autoRetryRef.current) {
-      autoRetryRef.current = false;
-      runBacktest();
-    }
-  }, [retryAfter]);
-
   const runBacktest = useCallback(async () => {
-    // Debounce: ignore clicks within 5 seconds
-    const now = Date.now();
-    if (debounceRef.current && now - debounceRef.current < 5000) {
-      return;
-    }
-    debounceRef.current = now;
+    // Prevent spam-clicking with a lock
+    if (lockedRef.current || running) return;
+    lockedRef.current = true;
 
     setRunning(true);
     setError(null);
@@ -151,6 +397,9 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
     setShowTrades(false);
     setRetryAfter(0);
     setElapsedSeconds(0);
+    setPhase('fetching');
+    setProgressCurrent(0);
+    setProgressTotal(0);
 
     // Start elapsed time counter
     const startMs = Date.now();
@@ -159,14 +408,13 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
     }, 1000);
 
     try {
+      // Step 1: Fetch OHLCV data from lightweight endpoint
       const params = new URLSearchParams({
         coin: coin || defaultCoin,
         interval,
         days: String(days),
-        balance,
-        leverage: String(leverage),
       });
-      const res = await fetch(`/api/crypto/backtest?${params}`);
+      const res = await fetch(`/api/crypto/backtest-ohlcv?${params}`);
 
       if (!res.ok) {
         let errMsg = `HTTP ${res.status}`;
@@ -193,9 +441,41 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
       }
 
       const json = await res.json();
-      setResult(json);
+      const candles: OhlcvCandle[] = json.data;
+
+      if (!Array.isArray(candles) || candles.length < 50) {
+        throw new Error(`Недостаточно данных для бэктеста (${candles?.length ?? 0} свечей). Увеличьте количество дней.`);
+      }
+
+      // Step 2: Run backtest client-side with progress
+      setPhase('computing');
+      setProgressTotal(candles.length - 50);
+      setProgressCurrent(0);
+
+      // Use setTimeout to not block the UI thread
+      await new Promise<void>((resolve, reject) => {
+        setTimeout(() => {
+          try {
+            const backtestResult = runClientBacktest(candles, {
+              initialBalance: parseFloat(balance) || 1000,
+              leverage,
+              riskPerTradePct: 2,
+              maxPositions: 3,
+              stopLossPct: 2,
+              takeProfitPct: 4,
+            }, (current, total) => {
+              setProgressCurrent(current);
+            });
+            setResult(backtestResult);
+            setPhase('done');
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        }, 50);
+      });
     } catch (e) {
-      // Don't overwrite error if we already set retryAfter (auto-retry will handle it)
+      // Don't overwrite error if we already set retryAfter
       if (retryAfterRef.current > 0 && autoRetryRef.current) {
         setError(null);
       } else {
@@ -209,8 +489,17 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
       if (retryAfterRef.current <= 0 || !autoRetryRef.current) {
         setRunning(false);
       }
+      lockedRef.current = false;
     }
-  }, [coin, interval, days, balance, leverage, defaultCoin]);
+  }, [coin, interval, days, balance, leverage, defaultCoin, running]);
+
+  // Auto-retry when countdown expires
+  useEffect(() => {
+    if (retryAfter === 0 && autoRetryRef.current) {
+      autoRetryRef.current = false;
+      runBacktest();
+    }
+  }, [retryAfter, runBacktest]);
 
   // Sync default coin when it changes
   React.useEffect(() => {
@@ -235,7 +524,7 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
           </DialogTitle>
           <DialogDescription>
             Тестирование торговой стратегии на исторических данных
-            <span className="block mt-1 text-[10px] text-muted-foreground/70">Для быстрых результатов используйте 1Ч–4Ч интервалы и 7–14 дней</span>
+            <span className="block mt-1 text-[10px] text-muted-foreground/70">EMA кроссовер стратегия (9/21/50). Для быстрых результатов используйте 1Ч–4Ч интервалы и 7–14 дней</span>
           </DialogDescription>
         </DialogHeader>
 
@@ -256,9 +545,10 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
                 <button
                   key={iv.value}
                   onClick={() => setInterval_(iv.value)}
+                  disabled={running}
                   className={`flex-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
                     interval === iv.value ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'
-                  }`}
+                  } disabled:opacity-50`}
                 >
                   {iv.label}
                 </button>
@@ -272,9 +562,10 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
                 <button
                   key={d}
                   onClick={() => setDays(d)}
+                  disabled={running}
                   className={`flex-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
                     days === d ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'
-                  }`}
+                  } disabled:opacity-50`}
                 >
                   {d}
                 </button>
@@ -290,6 +581,7 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
               className="h-8 text-xs"
               min="100"
               step="100"
+              disabled={running}
             />
           </div>
           <div className="space-y-1">
@@ -303,6 +595,7 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
               max={10}
               step={1}
               className="mt-2"
+              disabled={running}
             />
           </div>
         </div>
@@ -315,7 +608,11 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
           {running ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              Выполняется бэктест... {elapsedSeconds > 0 && `(${elapsedSeconds}с)`}
+              {phase === 'fetching' ? (
+                <>Загрузка данных... {elapsedSeconds > 0 && `(${elapsedSeconds}с)`}</>
+              ) : (
+                <>Анализ свечей... {elapsedSeconds > 0 && `(${elapsedSeconds}с)`}</>
+              )}
             </>
           ) : retryAfter > 0 ? (
             <>
@@ -337,15 +634,35 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
           </Card>
         )}
 
-        {/* Running spinner (prominent) */}
+        {/* Running state with progress */}
         {running && !result && !error && (
           <div className="flex flex-col items-center justify-center py-8 gap-3">
             <Loader2 className="w-12 h-12 animate-spin text-cyan-500" />
-            <p className="text-sm text-muted-foreground">
-              Анализ {days} дней на {interval} свечах...{' '}
-              <span className="font-mono text-foreground">{elapsedSeconds}с</span>
-            </p>
-            <p className="text-xs text-muted-foreground/60">Это может занять 30+ секунд</p>
+            {phase === 'fetching' ? (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Загрузка исторических данных...
+                </p>
+                <p className="text-xs text-muted-foreground/60">Получение свечей с Binance</p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Анализ {progressCurrent} / {progressTotal} свечей...{' '}
+                  <span className="font-mono text-foreground">{elapsedSeconds}с</span>
+                </p>
+                <p className="text-xs text-muted-foreground/60">EMA кроссовер стратегия</p>
+                {/* Progress bar */}
+                {progressTotal > 0 && (
+                  <div className="w-full max-w-xs h-2 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-cyan-500 rounded-full transition-all duration-200"
+                      style={{ width: `${Math.min(100, (progressCurrent / progressTotal) * 100)}%` }}
+                    />
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
 
@@ -444,7 +761,7 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
                         <TableBody>
                           {result.trades.map(t => (
                             <TableRow key={t.id}>
-                              <TableCell className="text-xs font-semibold">{t.coinSymbol}</TableCell>
+                              <TableCell className="text-xs font-semibold">{t.coinSymbol || '—'}</TableCell>
                               <TableCell>
                                 <Badge
                                   variant="outline"

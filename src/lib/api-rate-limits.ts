@@ -9,6 +9,7 @@ export const RATE_LIMITS: Record<string, RateLimitConfig> = {
   advisor: { windowMs: 60000, maxRequests: 5 },      // 60s, 5 req (uses LLM)
   thinking: { windowMs: 5000, maxRequests: 30 },     // 5s, 30 req
   backtest: { windowMs: 60000, maxRequests: 5 },       // 60s, 5 req
+  backtestOhlcv: { windowMs: 60000, maxRequests: 10 }, // 60s, 10 req (lightweight OHLCV fetch)
   newsAnalysis: { windowMs: 600000, maxRequests: 3 },  // 10min, 3 req (uses LLM)
   default: { windowMs: 10000, maxRequests: 60 },     // 10s, 60 req
 };
