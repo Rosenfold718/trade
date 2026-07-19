@@ -22,6 +22,7 @@ const nextConfig: NextConfig = {
               "frame-ancestors 'self' https://s.tradingview.com https://www.tradingview.com https://preview-*.space-z.ai",
               "frame-src 'self' https://s.tradingview.com https://www.tradingview.com https://s3.tradingview.com",
               "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://s3.tradingview.com https://s.tradingview.com",
+              "connect-src 'self' https://api.binance.com",
             ].join('; '),
           },
           {

@@ -7,7 +7,6 @@ import {
   Time,
   ColorType,
   LineStyle,
-  AreaSeries,
 } from 'lightweight-charts';
 import { useRef, useEffect } from 'react';
 
@@ -70,11 +69,11 @@ export function MiniSparkline({
     chartRef.current = chart;
 
     // ---- Area series ----
-    const areaSeries = chart.addSeries(AreaSeries, {
+    const areaSeries = chart.addAreaSeries({
       lineColor: color,
       topColor: color,
       bottomColor: 'transparent',
-      lineWidth: 2 as const,
+      lineWidth: 2,
       lineStyle: LineStyle.Solid,
       crosshairMarkerVisible: false,
       lastValueVisible: false,

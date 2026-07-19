@@ -1,24 +1,34 @@
 'use client';
 
-import {
-  createChart,
-  IChartApi,
-  ISeriesApi,
-  CandlestickData,
-  LineData,
-  HistogramData,
-  Time,
-  ColorType,
-  CrosshairMode,
-  LineStyle,
-  CandlestickSeries,
-  HistogramSeries,
-  LineSeries,
-} from 'lightweight-charts';
-import { useRef, useEffect, useMemo, useCallback } from 'react';
+import { createChart, IChartApi, ISeriesApi, CandlestickData, HistogramData, Time, ColorType, CrosshairMode, LineStyle } from 'lightweight-charts';
+import { useRef, useEffect, useCallback, useState } from 'react';
 
-// ---- Data types (aligned with CryptoDashboard) ----
+// CoinGecko ID → Binance symbol
+const COIN_TO_BINANCE: Record<string, string> = {
+  bitcoin: 'BTCUSDT', ethereum: 'ETHUSDT', solana: 'SOLUSDT',
+  ripple: 'XRPUSDT', binancecoin: 'BNBUSDT', cardano: 'ADAUSDT',
+  dogecoin: 'DOGEUSDT', 'avalanche-2': 'AVAXUSDT', polkadot: 'DOTUSDT',
+  chainlink: 'LINKUSDT', litecoin: 'LTCUSDT', uniswap: 'UNIUSDT',
+  cosmos: 'ATOMUSDT', near: 'NEARUSDT', aave: 'AAVEUSDT',
+  filecoin: 'FILUSDT', aptos: 'APTUSDT', arbitrum: 'ARBUSDT',
+  optimism: 'OPUSDT', sui: 'SUIUSDT', 'injective-protocol': 'INJUSDT',
+  pepe: 'PEPEUSDT', 'shiba-inu': 'SHIBUSDT', tron: 'TRXUSDT',
+  toncoin: 'TONUSDT', stellar: 'XLMUSDT', 'fetch-ai': 'FETUSDT',
+  thorchain: 'RUNEUSDT', maker: 'MKRUSDT', 'the-graph': 'GRTUSDT',
+  vechain: 'VETUSDT', algorand: 'ALGOUSDT', 'hedera-hashgraph': 'HBARUSDT',
+  dogwifcoin: 'WIFUSDT', 'polygon-ecosystem-token': 'POLUSDT',
+  bonk: 'BONKUSDT', celestia: 'TIAUSDT', starknet: 'STRKUSDT',
+  'worldcoin-wld': 'WLDUSDT', pendle: 'PENDLEUSDT',
+  'ondo-finance': 'ONDOUSDT', 'render-token': 'RENDERUSDT',
+  fantom: 'FTMUSDT',
+};
 
+function getBinanceSymbol(coinId: string): string {
+  if (COIN_TO_BINANCE[coinId]) return COIN_TO_BINANCE[coinId];
+  return coinId.toUpperCase().replace(/-/g, '') + 'USDT';
+}
+
+// Interface matching CryptoDashboard chart data
 export interface ChartDataPoint {
   timestamp: number;
   date: string;
@@ -55,14 +65,15 @@ export interface TradeSignal {
 }
 
 export interface CandlestickChartProps {
-  data: ChartDataPoint[];
+  coinId: string;
+  interval: string;
   tradeSignal: TradeSignal | null;
   height?: number;
   showIndicators?: boolean;
   onCrosshairMove?: (price: number | null) => void;
+  // Keep legacy data prop for backward compat but prefer coinId+interval
+  data?: ChartDataPoint[];
 }
-
-// ---- Helpers ----
 
 function formatPrice(price: number): string {
   if (!price || !isFinite(price)) return '0.00';
@@ -73,21 +84,16 @@ function formatPrice(price: number): string {
   return price.toFixed(8);
 }
 
-function toTime(timestamp: number): Time {
-  // lightweight-charts v5 expects seconds as number
-  const sec = Math.floor(timestamp / 1000);
-  if (sec <= 0 || !isFinite(sec)) return Math.floor(Date.now() / 1000) as Time;
-  return sec as Time;
-}
-
 // ---- Component ----
 
 export function CandlestickChart({
-  data,
+  coinId,
+  interval,
   tradeSignal,
   height = 480,
   showIndicators = true,
   onCrosshairMove,
+  data: legacyData,
 }: CandlestickChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -96,22 +102,123 @@ export function CandlestickChart({
   const ema9SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const ema21SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const priceLinesRef = useRef<string[]>([]);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [lastCandle, setLastCandle] = useState<{ time: number; open: number; high: number; low: number; close: number; volume: number } | null>(null);
+  const [candleCount, setCandleCount] = useState(0);
 
-  const currentPrice = useMemo(() => {
-    if (data.length === 0) return null;
-    return data[data.length - 1].close;
-  }, [data]);
+  const binanceSymbol = getBinanceSymbol(coinId);
 
-  // Build or rebuild the chart
+  // Map dashboard interval to Binance interval
+  const binanceInterval = interval || '1h';
+
+  // Load chart data from our proxy
+  const loadChart = useCallback(async () => {
+    if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
+
+    try {
+      const res = await fetch(`/api/klines?symbol=${binanceSymbol}&interval=${binanceInterval}&limit=500`);
+      if (!res.ok) throw new Error(`API error: ${res.status}`);
+      const json = await res.json();
+
+      if (!json.candles || json.candles.length === 0) {
+        setError('Нет данных');
+        return;
+      }
+
+      const candles: CandlestickData<Time>[] = json.candles.map((d: any) => ({
+        time: d.time as Time,
+        open: d.open,
+        high: d.high,
+        low: d.low,
+        close: d.close,
+      }));
+
+      const volumes: HistogramData<Time>[] = json.candles.map((d: any) => ({
+        time: d.time as Time,
+        value: d.volume,
+        color: d.close >= d.open ? 'rgba(16,185,129,0.25)' : 'rgba(239,68,68,0.25)',
+      }));
+
+      candleSeriesRef.current.setData(candles);
+      volumeSeriesRef.current.setData(volumes);
+      setCandleCount(candles.length);
+      setError(null);
+      setLoading(false);
+
+      // Store last candle for real-time updates
+      if (json.candles.length > 0) {
+        setLastCandle(json.candles[json.candles.length - 1]);
+      }
+
+      // If we have legacy data with indicators, plot EMA lines
+      if (showIndicators && legacyData && legacyData.length > 0) {
+        // Create a time→data map from legacy data
+        const legacyMap = new Map<number, ChartDataPoint>();
+        for (const d of legacyData) {
+          legacyMap.set(Math.floor(d.timestamp / 1000), d);
+        }
+
+        const ema9: { time: Time; value: number }[] = [];
+        const ema21: { time: Time; value: number }[] = [];
+
+        for (const candle of json.candles) {
+          const ld = legacyMap.get(candle.time);
+          if (ld) {
+            if (ld.ema9 != null) ema9.push({ time: candle.time as Time, value: ld.ema9 });
+            if (ld.ema21 != null) ema21.push({ time: candle.time as Time, value: ld.ema21 });
+          }
+        }
+
+        if (ema9SeriesRef.current) ema9SeriesRef.current.setData(ema9);
+        if (ema21SeriesRef.current) ema21SeriesRef.current.setData(ema21);
+      }
+
+      chartRef.current?.timeScale().fitContent();
+    } catch (err) {
+      console.error('[CandlestickChart] loadChart error:', err);
+      setError(err instanceof Error ? err.message : 'Ошибка загрузки');
+      setLoading(false);
+    }
+  }, [binanceSymbol, binanceInterval, showIndicators, legacyData]);
+
+  // Real-time update: poll every 5 seconds
+  const updateLastCandle = useCallback(async () => {
+    if (!candleSeriesRef.current) return;
+
+    try {
+      const res = await fetch(`/api/klines?symbol=${binanceSymbol}&interval=${binanceInterval}&limit=2`);
+      if (!res.ok) return;
+      const json = await res.json();
+      if (!json.candles || json.candles.length < 2) return;
+
+      const latest = json.candles[json.candles.length - 1];
+      candleSeriesRef.current.update({
+        time: latest.time as Time,
+        open: latest.open,
+        high: latest.high,
+        low: latest.low,
+        close: latest.close,
+      });
+
+      // Update volume
+      if (volumeSeriesRef.current) {
+        volumeSeriesRef.current.update({
+          time: latest.time as Time,
+          value: latest.volume,
+          color: latest.close >= latest.open ? 'rgba(16,185,129,0.25)' : 'rgba(239,68,68,0.25)',
+        });
+      }
+    } catch {}
+  }, [binanceSymbol, binanceInterval]);
+
+  // ---- Create chart (v4 API) ----
   useEffect(() => {
     if (!containerRef.current) return;
-    if (data.length === 0) return;
 
-    // ---- Create chart ----
-    const containerWidth = containerRef.current.clientWidth || 800;
     const chart = createChart(containerRef.current, {
-      width: containerWidth,
-      height,
+      autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
         textColor: '#9ca3af',
@@ -148,47 +255,29 @@ export function CandlestickChart({
 
     chartRef.current = chart;
 
-    // ---- Candlestick series ----
-    let candleSeries: ISeriesApi<'Candlestick'> | ISeriesApi<'Line'>;
-    let usedLineFallback = false;
-    try {
-      candleSeries = chart.addSeries(CandlestickSeries, {
-        upColor: '#10b981',
-        downColor: '#ef4444',
-        borderUpColor: '#10b981',
-        borderDownColor: '#ef4444',
-        wickUpColor: '#10b981',
-        wickDownColor: '#ef4444',
-      });
-      console.log('[CandlestickChart] CandlestickSeries created successfully');
-    } catch (err) {
-      console.error('[CandlestickChart] Failed to create CandlestickSeries, falling back to LineSeries:', err);
-      candleSeries = chart.addSeries(LineSeries, {
-        color: '#3b82f6',
-        lineWidth: 2,
-        priceLineVisible: true,
-        lastValueVisible: true,
-        crosshairMarkerVisible: true,
-        crosshairMarkerRadius: 4,
-      });
-      usedLineFallback = true;
-      console.log('[CandlestickChart] LineSeries fallback created successfully');
-    }
-    candleSeriesRef.current = candleSeries as ISeriesApi<'Candlestick'>;
+    // v4 API: addCandlestickSeries (not addSeries)
+    const candleSeries = chart.addCandlestickSeries({
+      upColor: '#10b981',
+      downColor: '#ef4444',
+      borderUpColor: '#10b981',
+      borderDownColor: '#ef4444',
+      wickUpColor: '#10b981',
+      wickDownColor: '#ef4444',
+    });
+    candleSeriesRef.current = candleSeries;
 
-    // ---- Volume series (bottom 20%) ----
-    const volumeSeries = chart.addSeries(HistogramSeries, {
+    // Volume histogram on separate price scale
+    const volumeSeries = chart.addHistogramSeries({
       priceFormat: { type: 'volume' },
       priceScaleId: 'volume',
     });
-
     chart.priceScale('volume').applyOptions({
       scaleMargins: { top: 0.82, bottom: 0 },
     });
     volumeSeriesRef.current = volumeSeries;
 
-    // ---- EMA overlay lines ----
-    const ema9Series = chart.addSeries(LineSeries, {
+    // EMA lines
+    const ema9Series = chart.addLineSeries({
       color: '#f59e0b',
       lineWidth: 1,
       lineStyle: LineStyle.Dashed,
@@ -198,7 +287,7 @@ export function CandlestickChart({
     });
     ema9SeriesRef.current = ema9Series;
 
-    const ema21Series = chart.addSeries(LineSeries, {
+    const ema21Series = chart.addLineSeries({
       color: '#a855f7',
       lineWidth: 1,
       lineStyle: LineStyle.Dashed,
@@ -208,125 +297,24 @@ export function CandlestickChart({
     });
     ema21SeriesRef.current = ema21Series;
 
-    // ---- Populate data ----
-    // Sort data by timestamp ascending (safety) and deduplicate
-    const sortedData = [...data].sort((a, b) => a.timestamp - b.timestamp);
-    const seen = new Set<number>();
-    const dedupedData = sortedData.filter(d => {
-      const ts = toTime(d.timestamp);
-      if (seen.has(ts as number)) return false;
-      seen.add(ts as number);
-      return true;
-    });
-
-    const candles: CandlestickData<Time>[] = dedupedData.map((d) => ({
-      time: toTime(d.timestamp),
-      open: d.open,
-      high: d.high,
-      low: d.low,
-      close: d.close,
-    }));
-
-    const volumes: HistogramData<Time>[] = dedupedData.map((d) => ({
-      time: toTime(d.timestamp),
-      value: d.volume,
-      color: d.close >= d.open ? 'rgba(16,185,129,0.25)' : 'rgba(239,68,68,0.25)',
-    }));
-
-    if (usedLineFallback) {
-      // Fallback: set close prices as line data
-      const lineData: LineData<Time>[] = dedupedData.map((d) => ({
-        time: toTime(d.timestamp),
-        value: d.close,
-      }));
-      (candleSeries as ISeriesApi<'Line'>).setData(lineData);
-      console.log('[CandlestickChart] LineSeries fallback data set,', lineData.length, 'points');
-    } else {
-      candleSeries.setData(candles);
-      console.log('[CandlestickChart] CandlestickSeries data set,', candles.length, 'candles');
-    }
-    volumeSeries.setData(volumes);
-
-    // ---- EMA data ----
-    if (showIndicators) {
-      const ema9: LineData<Time>[] = [];
-      const ema21: LineData<Time>[] = [];
-
-      for (const d of dedupedData) {
-        if (d.ema9 != null) ema9.push({ time: toTime(d.timestamp), value: d.ema9 });
-        if (d.ema21 != null) ema21.push({ time: toTime(d.timestamp), value: d.ema21 });
-      }
-
-      if (ema9.length > 1) ema9Series.setData(ema9);
-      if (ema21.length > 1) ema21Series.setData(ema21);
-    } else {
-      ema9Series.setData([]);
-      ema21Series.setData([]);
-    }
-
-    // ---- Trade signal price lines ----
-    if (tradeSignal && tradeSignal.direction !== 'FLAT') {
-      // Clear old price lines
-      priceLinesRef.current.forEach((id) => {
-        try {
-          candleSeries.removePriceLine(id as any);
-        } catch {}
-      });
-      priceLinesRef.current = [];
-
-      const addLine = (price: number, color: string, label: string, lineWidth: 1 | 2 | 3 | 4 = 1, lineStyle = LineStyle.Dashed) => {
-        if (price <= 0) return;
-        try {
-          const pl = candleSeries.createPriceLine({
-            price,
-            color,
-            lineWidth,
-            lineStyle,
-            axisLabelVisible: true,
-            title: label,
-          });
-          priceLinesRef.current.push(pl as unknown as string);
-        } catch {}
-      };
-
-      addLine(tradeSignal.entry, '#3b82f6', tradeSignal.entryType === 'LIMIT' ? 'LIMIT' : 'ENTRY', 2, LineStyle.Dotted);
-      addLine(tradeSignal.stopLoss, '#ef4444', 'STOP', 2, LineStyle.Dotted);
-      addLine(tradeSignal.takeProfit1, '#22c55e', 'TP1', 1);
-      addLine(tradeSignal.takeProfit2, '#10b981', 'TP2', 1);
-      if (tradeSignal.takeProfit3 > 0) {
-        addLine(tradeSignal.takeProfit3, '#059669', 'TP3', 1);
-      }
-    } else {
-      priceLinesRef.current.forEach((id) => {
-        try {
-          candleSeries.removePriceLine(id as any);
-        } catch {}
-      });
-      priceLinesRef.current = [];
-    }
-
-    // Current price is derived from data prop via useMemo above
-
-    // ---- Crosshair callback ----
-    const onXMove = onCrosshairMove;
+    // Crosshair callback
     chart.subscribeCrosshairMove((param) => {
       if (!param || !param.time) {
-        onXMove?.(null);
+        onCrosshairMove?.(null);
         return;
       }
       const candle = param.seriesData.get(candleSeries) as CandlestickData<Time> | undefined;
-      onXMove?.(candle?.close ?? null);
+      onCrosshairMove?.(candle?.close ?? null);
     });
 
-    // ---- Fit content & ensure visible ----
-    chart.timeScale().fitContent();
-    // Force visible range to show the latest candles
-    if (candles.length > 0) {
-      chart.timeScale().scrollToPosition(2, false);
-    }
+    // Load data
+    loadChart();
 
-    // ---- Cleanup ----
+    // Poll every 5s for updates
+    pollRef.current = setInterval(updateLastCandle, 5000);
+
     return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
@@ -336,34 +324,53 @@ export function CandlestickChart({
       priceLinesRef.current = [];
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, tradeSignal, height, showIndicators]);
+  }, [binanceSymbol, binanceInterval]);
 
-  // autoSize: true in chart options handles all resizing automatically.
-  // Do NOT add a manual ResizeObserver — it conflicts with autoSize and causes rendering glitches.
+  // ---- Trade signal price lines ----
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
 
-  // ---- Legend formatting ----
-  const lastDataPoint = data.length > 0 ? data[data.length - 1] : null;
-  const prevDataPoint = data.length > 1 ? data[data.length - 2] : null;
-  const priceChange = lastDataPoint && prevDataPoint ? lastDataPoint.close - prevDataPoint.close : 0;
-  const pctChange = prevDataPoint && prevDataPoint.close > 0 ? (priceChange / prevDataPoint.close) * 100 : 0;
-  const isUp = priceChange >= 0;
+    // Clear old price lines
+    priceLinesRef.current.forEach((id) => {
+      try { series.removePriceLine(id as any); } catch {}
+    });
+    priceLinesRef.current = [];
+
+    if (!tradeSignal || tradeSignal.direction === 'FLAT') return;
+
+    const addLine = (price: number, color: string, label: string, lineWidth: 1 | 2 | 3 | 4 = 1, lineStyle = LineStyle.Dashed) => {
+      if (price <= 0) return;
+      try {
+        const pl = series.createPriceLine({ price, color, lineWidth, lineStyle, axisLabelVisible: true, title: label });
+        priceLinesRef.current.push(pl as unknown as string);
+      } catch {}
+    };
+
+    addLine(tradeSignal.entry, '#3b82f6', tradeSignal.entryType === 'LIMIT' ? 'LIMIT' : 'ENTRY', 2, LineStyle.Dotted);
+    addLine(tradeSignal.stopLoss, '#ef4444', 'STOP', 2, LineStyle.Dotted);
+    addLine(tradeSignal.takeProfit1, '#22c55e', 'TP1', 1);
+    addLine(tradeSignal.takeProfit2, '#10b981', 'TP2', 1);
+    if (tradeSignal.takeProfit3 > 0) {
+      addLine(tradeSignal.takeProfit3, '#059669', 'TP3', 1);
+    }
+  }, [tradeSignal]);
+
+  // ---- Derived price info for legend ----
+  const priceChange = lastCandle ? 0 : 0; // Will be populated from data
+  const isUp = (priceChange) >= 0;
+  const displayPrice = lastCandle?.close || 0;
 
   return (
     <div className="relative w-full" style={{ height }}>
       {/* Legend overlay */}
-      {lastDataPoint && currentPrice !== null && (
+      {displayPrice > 0 && (
         <div className="absolute top-2 left-3 z-10 flex items-center gap-3 pointer-events-none select-none">
-          <span
-            className={`text-sm font-bold font-mono ${isUp ? 'text-emerald-400' : 'text-red-400'}`}
-          >
-            ${formatPrice(currentPrice)}
+          <span className="text-sm font-bold font-mono text-foreground">
+            ${formatPrice(displayPrice)}
           </span>
-          <span
-            className={`text-xs font-mono ${isUp ? 'text-emerald-400/80' : 'text-red-400/80'}`}
-          >
-            {isUp ? '+' : ''}
-            {formatPrice(Math.abs(priceChange))} ({isUp ? '+' : ''}
-            {pctChange.toFixed(2)}%)
+          <span className="text-[9px] font-mono text-muted-foreground">
+            {binanceSymbol} · {candleCount} свечей · {binanceInterval}
           </span>
           {tradeSignal && tradeSignal.direction !== 'FLAT' && (
             <span
@@ -423,12 +430,31 @@ export function CandlestickChart({
       )}
 
       {/* Chart container */}
-      <div ref={containerRef} className="w-full h-full" style={{ width: '100%', height: '100%' }} />
+      <div
+        ref={containerRef}
+        className="w-full h-full"
+        style={{ width: '100%', height: '100%', minHeight: 0 }}
+      />
 
-      {/* Empty state */}
-      {data.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm">
-          No chart data available
+      {/* Loading */}
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-background/80 z-20">
+          <div className="text-center">
+            <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+            <span className="text-sm text-muted-foreground">Загрузка {binanceSymbol}...</span>
+          </div>
+        </div>
+      )}
+
+      {/* Error */}
+      {error && !loading && (
+        <div className="absolute inset-0 flex items-center justify-center z-20">
+          <div className="text-center text-red-400">
+            <p className="text-sm">{error}</p>
+            <button onClick={loadChart} className="mt-2 text-xs text-emerald-400 hover:underline">
+              Повторить
+            </button>
+          </div>
         </div>
       )}
     </div>

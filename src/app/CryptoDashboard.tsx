@@ -664,19 +664,22 @@ export default function CryptoDashboard() {
 
             {/* Chart */}
             <Card><CardContent className="p-2 sm:p-3">
-              {chartLoading ? (
-                <div className="h-[480px] flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-emerald-500" /><span className="ml-3 text-sm text-muted-foreground">Загрузка...</span></div>
-              ) : useTradingView ? (
+              {useTradingView ? (
                 <TradingViewWidget
                   coinId={selectedCoin}
                   symbol={(selectedCoinData?.symbol || selectedCoin).toUpperCase()}
                   interval={interval}
                   height={480}
                 />
-              ) : chartData.length > 0 ? (
-                <CandlestickChart data={chartData} tradeSignal={chartTradeSignal} height={480} showIndicators={showIndicators} />
               ) : (
-                <div className="h-[480px] flex items-center justify-center text-muted-foreground"><div className="text-center"><BarChart3 className="w-10 h-10 mx-auto mb-2 opacity-30" /><p className="text-sm">Выберите монету</p></div></div>
+                <CandlestickChart
+                  coinId={selectedCoin}
+                  interval={interval}
+                  tradeSignal={chartTradeSignal}
+                  height={480}
+                  showIndicators={showIndicators}
+                  data={chartData}
+                />
               )}
             </CardContent></Card>
 

@@ -7,7 +7,6 @@ import {
   Time,
   ColorType,
   LineStyle,
-  AreaSeries,
 } from 'lightweight-charts';
 import { useRef, useEffect, useMemo } from 'react';
 
@@ -98,8 +97,7 @@ export function EquityChart({
     });
     chartRef.current = chart;
 
-    // ---- Area series ----
-    const areaSeries = chart.addSeries(AreaSeries, {
+    const areaSeries = chart.addAreaSeries({
       lineColor,
       topColor: topGradient,
       bottomColor: 'transparent',
