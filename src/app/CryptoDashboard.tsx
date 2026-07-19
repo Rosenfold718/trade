@@ -233,9 +233,51 @@ export default function CryptoDashboard() {
             .reduce((sum: number, t: Trade) => sum + t.positionSize, 0);
         }
         setReputation(serverData);
+      } else {
+        // API returned non-OK — build from localStorage fallback
+        const localOverrides = loadLocalTraderOverrides();
+        if (localOverrides && !reputation) {
+          const bal = localOverrides.balance ?? 100;
+          const debt = localOverrides.totalDebt ?? 0;
+          setReputation({
+            initialDeposit: localOverrides.initialDeposit ?? 100,
+            balance: bal,
+            totalTrades: 0, wins: 0, losses: 0, expired: 0,
+            score: 0, winRate: 0, avgPnl: 0, streak: 0,
+            bestTrade: 0, worstTrade: 0, totalPnl: bal - (localOverrides.initialDeposit ?? 100),
+            level: 'Новичок', levelEmoji: '🌱',
+            riskPerTrade: 2, defaultLeverage: 3,
+            trades: [], depositHistory: localOverrides.depositHistory || [],
+            lastUpdated: Date.now(), totalDebt: debt,
+            debtHistory: localOverrides.debtHistory || [],
+            totalRepaid: 0, lockedInPositions: 0, freeBalance: bal,
+            adaptive: { minSlDistancePct: 0.5, minConfidence: 55, avoidCoins: [], minRr: 1.3, counterTrendPenalty: 20, limitExpiryHours: 24, marketEntryConditions: [], lessons: [], lessonsVersion: 0 },
+          });
+        }
       }
-    } catch {}
-  }, []);
+    } catch {
+      // Network error — build from localStorage fallback
+      const localOverrides = loadLocalTraderOverrides();
+      if (localOverrides && !reputation) {
+        const bal = localOverrides.balance ?? 100;
+        const debt = localOverrides.totalDebt ?? 0;
+        setReputation({
+          initialDeposit: localOverrides.initialDeposit ?? 100,
+          balance: bal,
+          totalTrades: 0, wins: 0, losses: 0, expired: 0,
+          score: 0, winRate: 0, avgPnl: 0, streak: 0,
+          bestTrade: 0, worstTrade: 0, totalPnl: bal - (localOverrides.initialDeposit ?? 100),
+          level: 'Новичок', levelEmoji: '🌱',
+          riskPerTrade: 2, defaultLeverage: 3,
+          trades: [], depositHistory: localOverrides.depositHistory || [],
+          lastUpdated: Date.now(), totalDebt: debt,
+          debtHistory: localOverrides.debtHistory || [],
+          totalRepaid: 0, lockedInPositions: 0, freeBalance: bal,
+          adaptive: { minSlDistancePct: 0.5, minConfidence: 55, avoidCoins: [], minRr: 1.3, counterTrendPenalty: 20, limitExpiryHours: 24, marketEntryConditions: [], lessons: [], lessonsVersion: 0 },
+        });
+      }
+    }
+  }, [reputation]);
 
   const recordThought = useCallback(async (thought: any) => {
     try { await fetch('/api/crypto/trader-thinking', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(thought) }); } catch {}

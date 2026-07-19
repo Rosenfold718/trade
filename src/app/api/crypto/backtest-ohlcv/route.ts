@@ -1,17 +1,7 @@
 import { NextResponse } from 'next/server';
 import { rateLimit } from '@/lib/rate-limit';
 import { RATE_LIMITS } from '@/lib/api-rate-limits';
-import { BINANCE_BASE, getBinanceSymbol, getBinanceInterval } from '@/lib/api-sources';
-
-// Types
-interface OhlcvCandle {
-  timestamp: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-}
+import { fetchHistoricalOHLCV } from '@/lib/fetch-ohlcv';
 
 export async function GET(request: Request) {
   const clientIp = request.headers.get('x-forwarded-for') || 'unknown';
@@ -47,50 +37,20 @@ export async function GET(request: Request) {
   }
 
   const startTime = Date.now() - days * 86_400_000;
-
-  const binanceSymbol = getBinanceSymbol(coin);
-  if (!binanceSymbol) {
-    return NextResponse.json({ error: `Нет данных Binance для ${coin}` }, { status: 400 });
-  }
+  const endTime = Date.now();
 
   try {
-    const binanceInterval = getBinanceInterval(interval);
-    const allCandles: OhlcvCandle[] = [];
-    let cursor = startTime;
+    const { data, source } = await fetchHistoricalOHLCV(coin, interval, startTime, endTime);
 
-    while (cursor < Date.now()) {
-      const url = `${BINANCE_BASE}/klines?symbol=${binanceSymbol}USDT&interval=${binanceInterval}&startTime=${cursor}&endTime=${Date.now()}&limit=1000`;
-      const resp = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-      if (!resp.ok) throw new Error(`Binance returned ${resp.status}`);
-
-      const rows: unknown[] = await resp.json();
-      if (!Array.isArray(rows) || rows.length === 0) break;
-
-      for (const row of rows) {
-        const r = row as unknown[];
-        allCandles.push({
-          timestamp: Number(r[0]),
-          open: parseFloat(String(r[1])),
-          high: parseFloat(String(r[2])),
-          low: parseFloat(String(r[3])),
-          close: parseFloat(String(r[4])),
-          volume: parseFloat(String(r[5])),
-        });
-        if (Number(r[0]) >= cursor) cursor = Number(r[0]) + 1;
-      }
-
-      if (rows.length < 1000) break;
-    }
-
-    if (allCandles.length < 20) {
+    if (data.length < 20) {
       return NextResponse.json(
-        { error: `Недостаточно данных: ${allCandles.length} свечей. Увеличьте количество дней.` },
+        { error: `Недостаточно данных: ${data.length} свечей (источник: ${source || 'нет'}). Увеличьте количество дней.` },
         { status: 422 },
       );
     }
 
     return NextResponse.json(
-      { data: allCandles, source: 'binance' },
+      { data, source: source || 'unknown' },
       {
         headers: {
           'Cache-Control': 'no-store',

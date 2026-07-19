@@ -140,7 +140,9 @@ function pnlBarColor(v: number): string {
 // ─── Analytics computation ───
 
 function computePerformanceData(rep: ReputationData): PerformanceData {
-  const resolved = rep.trades.filter((t) => t.resolved && t.pnlUSDT !== null) as (Trade & {
+  const allTrades = Array.isArray(rep.trades) ? rep.trades : [];
+  const allDeposits = Array.isArray(rep.depositHistory) ? rep.depositHistory : [];
+  const resolved = allTrades.filter((t) => t.resolved && t.pnlUSDT !== null) as (Trade & {
     pnlUSDT: number;
     closedAt: number | null;
     enteredAt: number | null;
@@ -152,7 +154,8 @@ function computePerformanceData(rep: ReputationData): PerformanceData {
   const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
 
   const totalPnl = resolved.reduce((s, t) => s + t.pnlUSDT, 0);
-  const totalPnlPct = rep.initialDeposit > 0 ? (totalPnl / rep.initialDeposit) * 100 : 0;
+  const initialDeposit = rep.initialDeposit || 100;
+  const totalPnlPct = initialDeposit > 0 ? (totalPnl / initialDeposit) * 100 : 0;
 
   // Profit factor: gross wins / gross losses
   const grossWins = resolved
@@ -198,9 +201,9 @@ function computePerformanceData(rep: ReputationData): PerformanceData {
 
   // Max drawdown from depositHistory
   let maxDrawdown = 0;
-  if (rep.depositHistory.length > 0) {
-    let peak = rep.depositHistory[0].equity;
-    for (const snap of rep.depositHistory) {
+  if (allDeposits.length > 0) {
+    let peak = allDeposits[0].equity;
+    for (const snap of allDeposits) {
       if (snap.equity > peak) peak = snap.equity;
       const dd = peak > 0 ? ((peak - snap.equity) / peak) * 100 : 0;
       if (dd > maxDrawdown) maxDrawdown = dd;
@@ -208,7 +211,7 @@ function computePerformanceData(rep: ReputationData): PerformanceData {
   }
 
   // Calmar ratio: annualized return / max drawdown
-  const annualizedReturn = rep.initialDeposit > 0 ? totalPnlPct : 0;
+  const annualizedReturn = initialDeposit > 0 ? totalPnlPct : 0;
   const calmarRatio = maxDrawdown > 0 ? annualizedReturn / maxDrawdown : annualizedReturn >= 0 ? Infinity : 0;
 
   // Consecutive wins/losses
@@ -235,7 +238,7 @@ function computePerformanceData(rep: ReputationData): PerformanceData {
     resolved.length > 0 ? Math.min(...resolved.map((t) => t.pnlUSDT)) : 0;
 
   // Equity curve from depositHistory
-  const equityCurve = rep.depositHistory.map((s) => ({
+  const equityCurve = allDeposits.map((s) => ({
     timestamp: s.timestamp,
     equity: s.equity,
     balance: s.balance,
@@ -364,7 +367,7 @@ function computePerformanceData(rep: ReputationData): PerformanceData {
     consecutiveLosses,
     bestTrade,
     worstTrade,
-    initialDeposit: rep.initialDeposit,
+    initialDeposit,
     equityCurve,
     monthlyBreakdown,
     directionBreakdown,
@@ -431,7 +434,12 @@ function MonthlyTooltip({ active, payload, label }: any) {
 export function PerformanceDashboard({ visible, onClose, reputation }: PerformanceDashboardProps) {
   const data = useMemo<PerformanceData | null>(() => {
     if (!reputation) return null;
-    return computePerformanceData(reputation);
+    try {
+      return computePerformanceData(reputation);
+    } catch (e) {
+      console.error('PerformanceDashboard compute error:', e);
+      return null;
+    }
   }, [reputation]);
 
   if (!visible) return null;
@@ -517,9 +525,9 @@ export function PerformanceDashboard({ visible, onClose, reputation }: Performan
             <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 flex items-center justify-center mx-auto">
               <BarChart3 className="w-8 h-8 text-emerald-500/50" />
             </div>
-            <h3 className="text-lg font-bold">Данные не загружены</h3>
+            <h3 className="text-lg font-bold">Нет данных</h3>
             <p className="text-sm text-muted-foreground">
-              Дождитесь загрузки данных репутации.
+              {reputation ? 'Произошла ошибка при расчёте статистики. Дождитесь завершения первых сделок.' : 'Данные репутации ещё не загружены. Дождитесь подключения к серверу.'}
             </p>
           </div>
         </div>

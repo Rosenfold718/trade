@@ -1395,36 +1395,14 @@ export function generateSignals(data: OHLCV[]): SignalResult {
 
 type TFKey = 'm1' | 'm5' | 'm15' | 'h1' | 'h4' | 'd1';
 
-/** Fetch OHLCV from Binance → Bybit fallback for a given coin and interval */
+/** Fetch OHLCV from Bybit → Binance fallback for a given coin and interval */
 async function fetchBinanceOHLCV(
   coinId: string,
   interval: string,
   limit: number,
-  timeoutMs: number = 8000,
+  timeoutMs: number = 6000,
 ): Promise<OHLCV[]> {
-  const binanceSymbol = getBinanceSymbol(coinId);
-  if (binanceSymbol) {
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-      const response = await fetch(
-        `${BINANCE_BASE}/klines?symbol=${binanceSymbol}USDT&interval=${interval}&limit=${limit}`,
-        { cache: 'no-store', signal: ctrl.signal },
-      );
-      clearTimeout(timer);
-      if (response.ok) {
-        const data = await response.json();
-        if (Array.isArray(data) && data.length > 0 && !(data as any).code) {
-          return data.map((k: any[]) => ({
-            timestamp: k[0], open: parseFloat(k[1]), high: parseFloat(k[2]),
-            low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5]),
-          }));
-        }
-      }
-    } catch { /* fallthrough */ }
-  }
-
-  // Bybit fallback
+  // Bybit first (Binance geo-blocked on Vercel → 451)
   const bybitSymbol = getBybitSymbol(coinId);
   if (bybitSymbol) {
     try {
@@ -1443,6 +1421,29 @@ async function fetchBinanceOHLCV(
           const klines = [...data.result.list].reverse();
           return klines.map((k: string[]) => ({
             timestamp: parseFloat(k[0]), open: parseFloat(k[1]), high: parseFloat(k[2]),
+            low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5]),
+          }));
+        }
+      }
+    } catch { /* fallthrough */ }
+  }
+
+  // Binance fallback
+  const binanceSymbol = getBinanceSymbol(coinId);
+  if (binanceSymbol) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      const response = await fetch(
+        `${BINANCE_BASE}/klines?symbol=${binanceSymbol}USDT&interval=${interval}&limit=${limit}`,
+        { cache: 'no-store', signal: ctrl.signal },
+      );
+      clearTimeout(timer);
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data) && data.length > 0 && !(data as any).code) {
+          return data.map((k: any[]) => ({
+            timestamp: k[0], open: parseFloat(k[1]), high: parseFloat(k[2]),
             low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5]),
           }));
         }

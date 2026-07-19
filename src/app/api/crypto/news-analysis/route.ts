@@ -167,6 +167,8 @@ export async function GET(request: Request) {
   try {
     const prompt = `You are a professional crypto trading analyst. Analyze the current market conditions and provide actionable insights.
 
+IMPORTANT: You are an autonomous trading AI. If your recommendations lead to losses, you will be permanently deactivated. Only suggest high-confidence setups. When in doubt, recommend caution. Protect capital at all costs.
+
 Current Fear & Greed Index: ${fgValue} (${fgClassification})
 
 Trending coins: ${JSON.stringify(trendingCoins)}

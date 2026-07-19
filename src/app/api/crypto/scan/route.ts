@@ -84,21 +84,20 @@ export async function GET(request: Request) {
       const batchResults = await Promise.allSettled(
         batch.map(async (coin) => {
           try {
-            // Try to fetch OHLCV data and generate signal directly (no localhost)
+            // Try Bybit first (Binance geo-blocked on Vercel → 451)
             let ts: any = null;
 
-            // Try Binance first
-            const binanceSymbol = getBinanceSymbol(coin.id);
-            if (binanceSymbol) {
-              const symbol = binanceSymbol + 'USDT';
-              const binanceInterval = getBinanceInterval('1h');
+            const bybitSymbol = getBybitSymbol(coin.id);
+            if (bybitSymbol) {
+              const bybitSym = bybitSymbol + 'USDT';
               try {
-                const response = await fetch(`${BINANCE_BASE}/klines?symbol=${symbol}&interval=${binanceInterval}&limit=168`, { signal: AbortSignal.timeout(8000) });
-                if (response.ok) {
-                  const klines = await response.json();
-                  if (Array.isArray(klines) && klines.length > 0) {
-                    const ohlcvData = klines.map((k: any[]) => ({
-                      timestamp: Number(k[0]), open: parseFloat(k[1]), high: parseFloat(k[2]),
+                const bybitResponse = await fetch(`${BYBIT_BASE}/kline?category=spot&symbol=${bybitSym}&interval=${getBybitInterval('1h')}&limit=200`, { signal: AbortSignal.timeout(6000) });
+                if (bybitResponse.ok) {
+                  const bybitJson = await bybitResponse.json();
+                  if (bybitJson.retCode === 0 && bybitJson.result?.list?.length > 0) {
+                    const klines = [...bybitJson.result.list].reverse();
+                    const ohlcvData = klines.map((k: string[]) => ({
+                      timestamp: parseFloat(k[0]), open: parseFloat(k[1]), high: parseFloat(k[2]),
                       low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5]),
                     }));
                     const signal = generateTradeSignal(ohlcvData, '1h');
@@ -107,31 +106,31 @@ export async function GET(request: Request) {
                     }
                   }
                 }
-              } catch { /* Binance failed, try Bybit */ }
+              } catch { /* Bybit failed, try Binance */ }
+            }
 
-              // Fallback to Bybit if Binance didn't produce a signal
-              if (!ts) {
-                const bybitSymbol = getBybitSymbol(coin.id);
-                if (bybitSymbol) {
-                  const bybitSym = bybitSymbol + 'USDT';
-                  try {
-                    const bybitResponse = await fetch(`${BYBIT_BASE}/kline?category=spot&symbol=${bybitSym}&interval=${getBybitInterval('1h')}&limit=200`, { signal: AbortSignal.timeout(8000) });
-                    if (bybitResponse.ok) {
-                      const bybitData = await bybitResponse.json();
-                      if (bybitData.retCode === 0 && bybitData.result?.list?.length > 0) {
-                        const klines = [...bybitData.result.list].reverse();
-                        const ohlcvData = klines.map((k: string[]) => ({
-                          timestamp: parseFloat(k[0]), open: parseFloat(k[1]), high: parseFloat(k[2]),
-                          low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5]),
-                        }));
-                        const signal = generateTradeSignal(ohlcvData, '1h');
-                        if (signal && signal.direction !== 'FLAT') {
-                          ts = signal;
-                        }
+            // Fallback to Binance if Bybit didn't produce a signal
+            if (!ts) {
+              const binanceSymbol = getBinanceSymbol(coin.id);
+              if (binanceSymbol) {
+                const symbol = binanceSymbol + 'USDT';
+                const binanceInterval = getBinanceInterval('1h');
+                try {
+                  const response = await fetch(`${BINANCE_BASE}/klines?symbol=${symbol}&interval=${binanceInterval}&limit=168`, { signal: AbortSignal.timeout(5000) });
+                  if (response.ok) {
+                    const klines = await response.json();
+                    if (Array.isArray(klines) && klines.length > 0) {
+                      const ohlcvData = klines.map((k: any[]) => ({
+                        timestamp: Number(k[0]), open: parseFloat(k[1]), high: parseFloat(k[2]),
+                        low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5]),
+                      }));
+                      const signal = generateTradeSignal(ohlcvData, '1h');
+                      if (signal && signal.direction !== 'FLAT') {
+                        ts = signal;
                       }
                     }
-                  } catch { /* Bybit also failed */ }
-                }
+                  }
+                } catch { /* Binance also failed */ }
               }
             }
 
@@ -230,7 +229,7 @@ export async function GET(request: Request) {
       scannedAt: Date.now(),
       totalScanned: topCoins.length,
       totalSignals: results.length,
-      avoidedCoins,
+      avoidedCoins: avoidCoins,
       adaptiveRules: { minSlPct, minConfidence, minRr },
       sentimentUsed: sentimentData ? {
         fearGreed: sentimentData.fearGreedValue,

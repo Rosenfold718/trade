@@ -53,8 +53,32 @@ export async function GET(request: Request) {
     else interval = '1w';
     const limit = d <= 1 ? 24 : d <= 7 ? 42 : d <= 30 ? 30 : d <= 90 ? 30 : 52;
 
-    // Strategy 1: Binance
+    // Strategy 1: Bybit (primary — works from US/Vercel)
     const symbol = COINGECKO_TO_SYMBOL[id] || id.toUpperCase().replace(/-/g, '');
+    try {
+      const bybitSymbol = symbol + 'USDT';
+      const bybitInterval = getBybitInterval(d);
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5000);
+      const bybitResponse = await fetch(
+        `${BYBIT_BASE}/kline?category=spot&symbol=${bybitSymbol}&interval=${bybitInterval}&limit=${Math.min(limit, 200)}`,
+        { cache: 'no-store', signal: ctrl.signal }
+      );
+      clearTimeout(timer);
+      if (bybitResponse.ok) {
+        const data = await bybitResponse.json();
+        if (data.retCode === 0 && data.result?.list?.length > 0) {
+          const klines = [...data.result.list].reverse();
+          const ohlcv = klines.map((k: string[]) => ({
+            timestamp: parseFloat(k[0]), open: parseFloat(k[1]), high: parseFloat(k[2]),
+            low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5]),
+          }));
+          return NextResponse.json({ data: ohlcv, source: 'bybit' });
+        }
+      }
+    } catch { /* try next */ }
+
+    // Strategy 2: Binance (fallback — may 451 from US)
     try {
       const binanceSymbol = symbol + 'USDT';
       const url = `${BINANCE_BASE}/klines?symbol=${binanceSymbol}&interval=${interval}&limit=${limit}`;
@@ -70,30 +94,6 @@ export async function GET(request: Request) {
             low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5]),
           }));
           return NextResponse.json({ data: ohlcv, source: 'binance' });
-        }
-      }
-    } catch { /* try next */ }
-
-    // Strategy 2: Bybit
-    try {
-      const bybitSymbol = symbol + 'USDT';
-      const bybitInterval = getBybitInterval(d);
-      const ctrl2 = new AbortController();
-      const timer2 = setTimeout(() => ctrl2.abort(), 5000);
-      const bybitResponse = await fetch(
-        `${BYBIT_BASE}/kline?category=spot&symbol=${bybitSymbol}&interval=${bybitInterval}&limit=${Math.min(limit, 200)}`,
-        { cache: 'no-store', signal: ctrl2.signal }
-      );
-      clearTimeout(timer2);
-      if (bybitResponse.ok) {
-        const data = await bybitResponse.json();
-        if (data.retCode === 0 && data.result?.list?.length > 0) {
-          const klines = [...data.result.list].reverse();
-          const ohlcv = klines.map((k: string[]) => ({
-            timestamp: parseFloat(k[0]), open: parseFloat(k[1]), high: parseFloat(k[2]),
-            low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5]),
-          }));
-          return NextResponse.json({ data: ohlcv, source: 'bybit' });
         }
       }
     } catch { /* try next */ }

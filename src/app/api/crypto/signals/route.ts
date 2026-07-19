@@ -65,6 +65,7 @@ function hourlyToOHLCV(prices: number[][], volumes: number[][]): OHLCV[] {
 }
 
 // Fetch OHLCV from multiple sources with fallback
+// CRITICAL: Bybit first (Binance geo-blocked on Vercel → 451)
 async function fetchOHLCV(coinId: string, interval: string, limit: number): Promise<{ data: OHLCV[]; source: string }> {
   const timeoutMs = 5000;
 
@@ -72,7 +73,35 @@ async function fetchOHLCV(coinId: string, interval: string, limit: number): Prom
   const cgDays: Record<string, number> = { '1m': 1, '5m': 1, '15m': 1, '1h': 7, '4h': 30 };
   const daysParam = cgDays[interval] || 1;
 
-  // Strategy 1: Binance
+  // Strategy 1: Bybit (primary — works from US/Vercel)
+  const bybitSymbol = getBybitSymbol(coinId);
+  if (bybitSymbol) {
+    try {
+      const symbol = bybitSymbol + 'USDT';
+      const bybitInterval = getBybitInterval(interval);
+      const bybitLimit = Math.min(limit, 200);
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      const response = await fetch(
+        `${BYBIT_BASE}/kline?category=spot&symbol=${symbol}&interval=${bybitInterval}&limit=${bybitLimit}`,
+        { cache: 'no-store', signal: ctrl.signal }
+      );
+      clearTimeout(timer);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.retCode === 0 && data.result?.list?.length > 0) {
+          const klines = [...data.result.list].reverse();
+          const ohlcv = klines.map((k: string[]) => ({
+            timestamp: parseFloat(k[0]), open: parseFloat(k[1]), high: parseFloat(k[2]),
+            low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5]),
+          }));
+          return { data: ohlcv, source: 'bybit' };
+        }
+      }
+    } catch { /* try next */ }
+  }
+
+  // Strategy 2: Binance (fallback — may 451 from US)
   const binanceSymbol = getBinanceSymbol(coinId);
   if (binanceSymbol) {
     try {
@@ -92,34 +121,6 @@ async function fetchOHLCV(coinId: string, interval: string, limit: number): Prom
             low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5]),
           }));
           return { data: ohlcv, source: 'binance' };
-        }
-      }
-    } catch { /* try next */ }
-  }
-
-  // Strategy 2: Bybit
-  const bybitSymbol = getBybitSymbol(coinId);
-  if (bybitSymbol) {
-    try {
-      const symbol = bybitSymbol + 'USDT';
-      const bybitInterval = getBybitInterval(interval);
-      const bybitLimit = Math.min(limit, 200);
-      const ctrl2 = new AbortController();
-      const timer2 = setTimeout(() => ctrl2.abort(), timeoutMs);
-      const response = await fetch(
-        `${BYBIT_BASE}/kline?category=spot&symbol=${symbol}&interval=${bybitInterval}&limit=${bybitLimit}`,
-        { cache: 'no-store', signal: ctrl2.signal }
-      );
-      clearTimeout(timer2);
-      if (response.ok) {
-        const data = await response.json();
-        if (data.retCode === 0 && data.result?.list?.length > 0) {
-          const klines = [...data.result.list].reverse();
-          const ohlcv = klines.map((k: string[]) => ({
-            timestamp: parseFloat(k[0]), open: parseFloat(k[1]), high: parseFloat(k[2]),
-            low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5]),
-          }));
-          return { data: ohlcv, source: 'bybit' };
         }
       }
     } catch { /* try next */ }

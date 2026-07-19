@@ -69,7 +69,54 @@ export function NewsAnalysisDialog({ open, onOpenChange }: NewsAnalysisDialogPro
       cacheRef.current = { data: mapped, timestamp: Date.now() };
       setData(mapped);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Ошибка загрузки');
+      // API failed — try client-side fallback directly from CoinGecko + Fear&Greed
+      try {
+        const [trendingRes, fgRes] = await Promise.allSettled([
+          fetch('https://api.coingecko.com/api/v3/search/trending', { signal: AbortSignal.timeout(6000) }),
+          fetch('https://api.alternative.me/fng/?limit=1', { signal: AbortSignal.timeout(5000) }),
+        ]);
+
+        let trendingCoins: string[] = [];
+        if (trendingRes.status === 'fulfilled' && trendingRes.value.ok) {
+          const tData = await trendingRes.value.json();
+          trendingCoins = (tData.coins || []).slice(0, 7).map((c: any) => c.item ? `${c.item.name} (${c.item.symbol?.toUpperCase()})` : '').filter(Boolean);
+        }
+
+        let fgValue = 50;
+        let fgClassification = 'Neutral';
+        if (fgRes.status === 'fulfilled' && fgRes.value.ok) {
+          const fgData = await fgRes.value.json();
+          fgValue = parseInt(fgData.data?.[0]?.value, 10) || 50;
+          fgClassification = fgData.data?.[0]?.value_classification || 'Neutral';
+        }
+
+        const outlook = fgValue >= 60 ? 'Бычий (Bullish)' : fgValue <= 40 ? 'Медвежий (Bearish)' : 'Нейтральный';
+        const confidence = fgValue >= 60 ? 55 + Math.floor((fgValue - 60) / 4) : fgValue <= 40 ? 55 + Math.floor((40 - fgValue) / 4) : 40;
+        const insights: string[] = [];
+        if (fgValue <= 25) insights.push('Рынок в крайней тревоге — потенциальная возможность для покупки');
+        else if (fgValue >= 75) insights.push('Экстремальная жадность — высокий риск коррекции');
+        else if (fgValue <= 45) insights.push('Преобладает страх — осторожный подход рекомендуется');
+        else if (fgValue >= 55) insights.push('Рынок в жадности — будьте осторожны с лонгами');
+        else insights.push('Нейтральные настроения — ждите подтверждения тренда');
+        insights.push(`Индекс страха и жадности: ${fgValue} (${fgClassification})`);
+        if (trendingCoins.length > 0) insights.push(`В тренде: ${trendingCoins.slice(0, 5).join(', ')}`);
+
+        const fallback: NewsAnalysisResult = {
+          outlook,
+          summary: insights.slice(0, 2).join('. ') + '.',
+          insights,
+          opportunities: trendingCoins.slice(0, 3).map(c => `${c} — потенциальная возможность`),
+          risks: ['Высокая волатильность рынка', 'Возможна резкая смена тренда'],
+          recommendedAction: fgValue >= 60 ? 'Рассмотрите постепенное наращивание позиций в трендовых активах' : fgValue <= 40 ? 'Уменьшите leverage, рассмотрите хеджирование' : 'Держите текущие позиции и ждите подтверждения тренда',
+          confidence: Math.min(75, confidence),
+          timestamp: new Date().toLocaleString('ru-RU'),
+        };
+
+        cacheRef.current = { data: fallback, timestamp: Date.now() };
+        setData(fallback);
+      } catch {
+        setError('Сервер анализа и резервные источники недоступны. Проверьте подключение к интернету.');
+      }
     } finally {
       setLoading(false);
     }

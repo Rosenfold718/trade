@@ -115,29 +115,27 @@ export function ReputationPanel({
             </div>
           </div>
 
-          {/* Debt / Credit row */}
-          {(reputation.totalDebt > 0 || reputation.totalRepaid > 0) && (
-            <div className="flex items-center gap-2 mt-2">
-              {reputation.totalDebt > 0 && (
-                <div className="flex-1 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 text-center">
-                  <div className="text-[8px] text-amber-500 uppercase">Долг</div>
-                  <div className="text-xs font-mono font-bold text-amber-500">${reputation.totalDebt.toFixed(2)}</div>
-                </div>
-              )}
-              {reputation.totalRepaid > 0 && (
-                <div className="flex-1 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2 text-center">
-                  <div className="text-[8px] text-emerald-500 uppercase">Возвращено</div>
-                  <div className="text-xs font-mono font-bold text-emerald-500">${reputation.totalRepaid.toFixed(2)}</div>
-                </div>
-              )}
-              <div className="flex-1 rounded-lg border border-border bg-card p-2 text-center">
-                <div className="text-[8px] text-muted-foreground uppercase">Собственные</div>
-                <div className={`text-xs font-mono font-bold ${(totalCapital - reputation.totalDebt) >= reputation.initialDeposit ? 'text-emerald-500' : 'text-red-500'}`}>
-                  ${(totalCapital - reputation.totalDebt).toFixed(2)}
-                </div>
+          {/* Debt / Credit row — always visible */}
+          <div className="flex items-center gap-2 mt-2">
+            {reputation.totalDebt > 0 && (
+              <div className="flex-1 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 text-center">
+                <div className="text-[8px] text-amber-500 uppercase">Долг</div>
+                <div className="text-xs font-mono font-bold text-amber-500">${reputation.totalDebt.toFixed(2)}</div>
+              </div>
+            )}
+            {reputation.totalRepaid > 0 && (
+              <div className="flex-1 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2 text-center">
+                <div className="text-[8px] text-emerald-500 uppercase">Возвращено</div>
+                <div className="text-xs font-mono font-bold text-emerald-500">${reputation.totalRepaid.toFixed(2)}</div>
+              </div>
+            )}
+            <div className="flex-1 rounded-lg border border-border bg-card p-2 text-center">
+              <div className="text-[8px] text-muted-foreground uppercase">Собственные</div>
+              <div className={`text-xs font-mono font-bold ${(totalCapital - reputation.totalDebt) >= reputation.initialDeposit ? 'text-emerald-500' : 'text-red-500'}`}>
+                ${(totalCapital - reputation.totalDebt).toFixed(2)}
               </div>
             </div>
-          )}
+          </div>
 
           {/* Deposit funds + Scan button */}
           <div className={`relative flex items-center gap-2 mt-2 rounded-lg p-2 -m-2 transition-all duration-500 ${depositSuccess ? 'bg-emerald-500/10 ring-1 ring-emerald-500/30' : ''}`}>

@@ -16,10 +16,20 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
+import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from 'recharts';
 
 // ─── Types ───
+
+interface ViabilityInfo {
+  score: number;
+  isViable: boolean;
+  warnings: string[];
+  recommendation: string;
+}
 
 interface BacktestTrade {
   id: string;
@@ -53,6 +63,7 @@ interface BacktestResult {
     avgHoldingBars: number;
     startingBalance: number;
     finalBalance: number;
+    viability: ViabilityInfo;
   };
   equityCurve: { step: number; equity: number; drawdown: number }[];
   trades: BacktestTrade[];
@@ -62,6 +73,8 @@ interface BacktestResult {
     days: number;
     startingBalance: number;
     leverage: number;
+    strategy: string;
+    rrRatio: number;
   };
 }
 
@@ -91,7 +104,13 @@ const INTERVALS = [
 
 const DAYS = [7, 14, 30, 60, 90];
 
-// ─── Client-side backtest engine ───
+const STRATEGY_OPTIONS = [
+  { value: 'ema-cross', label: 'EMA Кроссовер (улучш.)' },
+  { value: 'rsi-reversion', label: 'RSI Средняя возвратность' },
+  { value: 'breakout', label: 'Пробой' },
+];
+
+// ─── Indicator helpers ───
 
 function calcEMA(data: number[], period: number): number[] {
   const ema: number[] = [];
@@ -111,6 +130,152 @@ function calcEMA(data: number[], period: number): number[] {
   return ema;
 }
 
+function calcSMA(data: number[], period: number): number[] {
+  const sma: number[] = [];
+  for (let i = 0; i < data.length; i++) {
+    if (i < period - 1) {
+      sma.push(0);
+      continue;
+    }
+    const sum = data.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0);
+    sma.push(sum / period);
+  }
+  return sma;
+}
+
+function calcRSI(closes: number[], period: number = 14): number[] {
+  const rsi: number[] = [];
+  const gains: number[] = [];
+  const losses: number[] = [];
+
+  for (let i = 0; i < closes.length; i++) {
+    if (i === 0) {
+      rsi.push(50);
+      gains.push(0);
+      losses.push(0);
+      continue;
+    }
+    const change = closes[i] - closes[i - 1];
+    gains.push(change > 0 ? change : 0);
+    losses.push(change < 0 ? -change : 0);
+
+    if (i < period) {
+      rsi.push(50);
+      continue;
+    }
+
+    if (i === period) {
+      const avgGain = gains.slice(1, period + 1).reduce((a, b) => a + b, 0) / period;
+      const avgLoss = losses.slice(1, period + 1).reduce((a, b) => a + b, 0) / period;
+      const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+      rsi.push(100 - 100 / (1 + rs));
+    } else {
+      // Smoothed average
+      const prevRsi = rsi[i - 1];
+      // We need to track avgGain/avgLoss; recompute from the previous smoothed values
+      // Recompute using exponential smoothing
+      const prevAvgGain = gains.slice(i - period + 1, i).reduce((a, b) => a + b, 0) / period;
+      const prevAvgLoss = losses.slice(i - period + 1, i).reduce((a, b) => a + b, 0) / period;
+      const avgGain = (prevAvgGain * (period - 1) + gains[i]) / period;
+      const avgLoss = (prevAvgLoss * (period - 1) + losses[i]) / period;
+      const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+      rsi.push(100 - 100 / (1 + rs));
+    }
+  }
+  return rsi;
+}
+
+function calcATR(candles: OhlcvCandle[], period: number = 14): number[] {
+  const atr: number[] = [];
+  const trs: number[] = [];
+
+  for (let i = 0; i < candles.length; i++) {
+    if (i === 0) {
+      trs.push(candles[i].high - candles[i].low);
+      atr.push(candles[i].high - candles[i].low);
+      continue;
+    }
+    const tr = Math.max(
+      candles[i].high - candles[i].low,
+      Math.abs(candles[i].high - candles[i - 1].close),
+      Math.abs(candles[i].low - candles[i - 1].close),
+    );
+    trs.push(tr);
+
+    if (i < period) {
+      atr.push(0);
+      continue;
+    }
+
+    if (i === period) {
+      const sum = trs.slice(0, period + 1).reduce((a, b) => a + b, 0);
+      atr.push(sum / (period + 1));
+    } else {
+      atr.push((atr[i - 1] * (period - 1) + tr) / period);
+    }
+  }
+  return atr;
+}
+
+// ─── Viability calculator ───
+
+function computeViability(summary: {
+  winRate: number;
+  profitFactor: number;
+  maxDrawdownPercent: number;
+  totalPnl: number;
+}): ViabilityInfo {
+  const warnings: string[] = [];
+  let score = 0;
+
+  if (summary.winRate > 50) {
+    score += 25;
+  } else {
+    warnings.push(`Низкий винрейт (${summary.winRate.toFixed(1)}%)`);
+  }
+
+  if (summary.profitFactor > 1.5) {
+    score += 25;
+  } else if (summary.profitFactor > 1) {
+    score += 12;
+    warnings.push(`Профит-фактор ниже рекомендуемого (${summary.profitFactor.toFixed(2)})`);
+  } else {
+    warnings.push(`Профит-фактор неприемлем (${summary.profitFactor.toFixed(2)})`);
+  }
+
+  if (summary.maxDrawdownPercent < 15) {
+    score += 25;
+  } else if (summary.maxDrawdownPercent < 25) {
+    score += 10;
+    warnings.push(`Макс. просадка ${summary.maxDrawdownPercent.toFixed(1)}% (рекомендуется < 15%)`);
+  } else {
+    warnings.push(`Макс. просадка превышает 20% (${summary.maxDrawdownPercent.toFixed(1)}%)`);
+  }
+
+  if (summary.totalPnl > 0) {
+    score += 25;
+  } else {
+    warnings.push(`Отрицательный общий P&L ($${summary.totalPnl.toFixed(2)})`);
+  }
+
+  const isViable = score >= 50;
+  let recommendation: string;
+
+  if (score >= 75) {
+    recommendation = 'Стратегия показывает хорошие результаты на исторических данных. Рекомендуется использовать с осторожным риск-менеджментом.';
+  } else if (score >= 50) {
+    recommendation = 'Стратегия жизнеспособна с осторожным риск-менеджментом. Рекомендуется снизить размер позиции.';
+  } else if (score >= 25) {
+    recommendation = 'Стратегия имеет серьёзные недостатки. Не рекомендуется для реальной торговли без доработки.';
+  } else {
+    recommendation = 'Стратегия непригодна. Макс. просадка ' + summary.maxDrawdownPercent.toFixed(1) + '%.';
+  }
+
+  return { score, isViable, warnings, recommendation };
+}
+
+// ─── Client-side backtest engine ───
+
 function runClientBacktest(
   candles: OhlcvCandle[],
   config: {
@@ -118,8 +283,8 @@ function runClientBacktest(
     leverage: number;
     riskPerTradePct: number;
     maxPositions: number;
-    stopLossPct: number;
-    takeProfitPct: number;
+    strategy: string;
+    rrRatio: number;
   },
   onProgress: (current: number, total: number) => void,
 ): BacktestResult {
@@ -128,6 +293,11 @@ function runClientBacktest(
   let balance = config.initialBalance;
   let peakBalance = balance;
   let maxDrawdown = 0;
+
+  // Drawdown protection state
+  let drawdownStopped = false;
+  let consecutiveLosses = 0;
+  let pauseRemaining = 0;
 
   interface OpenPosition {
     id: string;
@@ -142,19 +312,35 @@ function runClientBacktest(
 
   let openPositions: OpenPosition[] = [];
 
+  // Pre-compute all indicators
   const closes = candles.map(c => c.close);
+  const volumes = candles.map(c => c.volume);
   const ema9 = calcEMA(closes, 9);
   const ema21 = calcEMA(closes, 21);
   const ema50 = calcEMA(closes, 50);
+  const rsi = calcRSI(closes, 14);
+  const atr = calcATR(candles, 14);
+  const avgVolume20 = calcSMA(volumes, 20);
 
   const totalCandles = candles.length;
+  const startIdx = 50; // need enough data for indicators
 
-  for (let i = 50; i < candles.length; i++) {
+  for (let i = startIdx; i < candles.length; i++) {
     const candle = candles[i];
     const date = new Date(candle.timestamp).toISOString().split('T')[0];
+    const currentATR = atr[i] || candle.close * 0.02; // fallback 2% if ATR=0
+    const currentRSI = rsi[i] || 50;
+    const currentVol = candle.volume;
+    const volAvg = avgVolume20[i] || currentVol;
+    const volumeOk = currentVol > volAvg * 0.8;
 
     // Report progress
-    onProgress(i - 50, totalCandles - 50);
+    onProgress(i - startIdx, totalCandles - startIdx);
+
+    // Decrease pause counter
+    if (pauseRemaining > 0) {
+      pauseRemaining--;
+    }
 
     // Check open positions for TP/SL
     for (let p = openPositions.length - 1; p >= 0; p--) {
@@ -178,6 +364,17 @@ function runClientBacktest(
         balance += netPnl;
         const result = netPnl >= 0 ? 'WIN' : 'LOSS';
 
+        // Track consecutive losses
+        if (result === 'LOSS') {
+          consecutiveLosses++;
+          if (consecutiveLosses >= 5) {
+            pauseRemaining = 10;
+            consecutiveLosses = 0;
+          }
+        } else {
+          consecutiveLosses = 0;
+        }
+
         trades.push({
           id: `bt-${trades.length}`,
           coinId: '',
@@ -195,63 +392,7 @@ function runClientBacktest(
       }
     }
 
-    // Generate signal: EMA9/21 crossover with EMA50 trend filter
-    if (ema9[i] > 0 && ema21[i] > 0 && ema50[i] > 0) {
-      const prevEma9 = ema9[i - 1];
-      const prevEma21 = ema21[i - 1];
-      const isUptrend = ema50[i] > ema50[i - 1];
-      const isDowntrend = ema50[i] < ema50[i - 1];
-
-      // LONG signal
-      if (
-        prevEma9 <= prevEma21
-        && ema9[i] > ema21[i]
-        && isUptrend
-        && openPositions.filter(p => p.direction === 'LONG').length < config.maxPositions
-      ) {
-        const riskAmount = balance * (config.riskPerTradePct / 100);
-        const slDistance = candle.close * (config.stopLossPct / 100);
-        const quantity = riskAmount / slDistance;
-        if (quantity > 0 && balance >= quantity * candle.close) {
-          openPositions.push({
-            id: `pos-${openPositions.length}`,
-            direction: 'LONG',
-            entryPrice: candle.close,
-            entryDate: date,
-            stopLoss: candle.close * (1 - config.stopLossPct / 100),
-            takeProfit: candle.close * (1 + config.takeProfitPct / 100),
-            quantity,
-            entryIndex: i,
-          });
-        }
-      }
-
-      // SHORT signal
-      if (
-        prevEma9 >= prevEma21
-        && ema9[i] < ema21[i]
-        && isDowntrend
-        && openPositions.filter(p => p.direction === 'SHORT').length < config.maxPositions
-      ) {
-        const riskAmount = balance * (config.riskPerTradePct / 100);
-        const slDistance = candle.close * (config.stopLossPct / 100);
-        const quantity = riskAmount / slDistance;
-        if (quantity > 0 && balance >= quantity * candle.close) {
-          openPositions.push({
-            id: `pos-${openPositions.length}`,
-            direction: 'SHORT',
-            entryPrice: candle.close,
-            entryDate: date,
-            stopLoss: candle.close * (1 + config.stopLossPct / 100),
-            takeProfit: candle.close * (1 - config.takeProfitPct / 100),
-            quantity,
-            entryIndex: i,
-          });
-        }
-      }
-    }
-
-    // Track equity
+    // Track equity & drawdown
     const unrealizedPnl = openPositions.reduce((sum, pos) => {
       const priceDiff = pos.direction === 'LONG'
         ? (candle.close - pos.entryPrice)
@@ -262,6 +403,196 @@ function runClientBacktest(
     if (equity > peakBalance) peakBalance = equity;
     const drawdown = peakBalance > 0 ? ((peakBalance - equity) / peakBalance) * 100 : 0;
     if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+
+    // Drawdown protection: stop trading if DD > 20%
+    if (drawdown > 20) {
+      drawdownStopped = true;
+    }
+
+    // Skip signal generation if drawdown stopped or paused or indicators not ready
+    if (drawdownStopped) continue;
+    if (pauseRemaining > 0) continue;
+    if (ema9[i] <= 0 || ema21[i] <= 0 || ema50[i] <= 0) continue;
+    if (currentATR <= 0) continue;
+
+    const canOpenLong = openPositions.filter(p => p.direction === 'LONG').length < config.maxPositions;
+    const canOpenShort = openPositions.filter(p => p.direction === 'SHORT').length < config.maxPositions;
+
+    const isUptrend = ema50[i] > ema50[i - 1];
+    const isDowntrend = ema50[i] < ema50[i - 1];
+
+    // RSI filter helpers
+    const rsiNotOverbought = currentRSI < 70;
+    const rsiNotOversold = currentRSI > 30;
+
+    // ATR-based SL/TP distances
+    const slDistance = 1.5 * currentATR;
+    const tpDistance = slDistance * config.rrRatio;
+
+    // ── Strategy: EMA Cross (improved) ──
+    if (config.strategy === 'ema-cross' && ema9[i - 1] > 0 && ema21[i - 1] > 0) {
+      const prevEma9 = ema9[i - 1];
+      const prevEma21 = ema21[i - 1];
+
+      // LONG: EMA9 crosses above EMA21, uptrend, RSI ok, volume ok
+      if (
+        prevEma9 <= prevEma21
+        && ema9[i] > ema21[i]
+        && isUptrend
+        && rsiNotOverbought
+        && volumeOk
+        && canOpenLong
+      ) {
+        const riskAmount = balance * (config.riskPerTradePct / 100);
+        const quantity = riskAmount / slDistance;
+        if (quantity > 0 && balance >= quantity * candle.close) {
+          openPositions.push({
+            id: `pos-${openPositions.length}`,
+            direction: 'LONG',
+            entryPrice: candle.close,
+            entryDate: date,
+            stopLoss: candle.close - slDistance,
+            takeProfit: candle.close + tpDistance,
+            quantity,
+            entryIndex: i,
+          });
+        }
+      }
+
+      // SHORT: EMA9 crosses below EMA21, downtrend, RSI ok, volume ok
+      if (
+        prevEma9 >= prevEma21
+        && ema9[i] < ema21[i]
+        && isDowntrend
+        && rsiNotOversold
+        && volumeOk
+        && canOpenShort
+      ) {
+        const riskAmount = balance * (config.riskPerTradePct / 100);
+        const quantity = riskAmount / slDistance;
+        if (quantity > 0 && balance >= quantity * candle.close) {
+          openPositions.push({
+            id: `pos-${openPositions.length}`,
+            direction: 'SHORT',
+            entryPrice: candle.close,
+            entryDate: date,
+            stopLoss: candle.close + slDistance,
+            takeProfit: candle.close - tpDistance,
+            quantity,
+            entryIndex: i,
+          });
+        }
+      }
+    }
+
+    // ── Strategy: RSI Mean Reversion ──
+    if (config.strategy === 'rsi-reversion') {
+      // LONG: RSI crosses above 30 (from below), uptrend filter, volume ok
+      if (
+        rsi[i - 1] < 30 && rsi[i] >= 30
+        && isUptrend
+        && volumeOk
+        && canOpenLong
+      ) {
+        const riskAmount = balance * (config.riskPerTradePct / 100);
+        const quantity = riskAmount / slDistance;
+        if (quantity > 0 && balance >= quantity * candle.close) {
+          openPositions.push({
+            id: `pos-${openPositions.length}`,
+            direction: 'LONG',
+            entryPrice: candle.close,
+            entryDate: date,
+            stopLoss: candle.close - slDistance,
+            takeProfit: candle.close + tpDistance,
+            quantity,
+            entryIndex: i,
+          });
+        }
+      }
+
+      // SHORT: RSI crosses below 70 (from above), downtrend filter, volume ok
+      if (
+        rsi[i - 1] > 70 && rsi[i] <= 70
+        && isDowntrend
+        && volumeOk
+        && canOpenShort
+      ) {
+        const riskAmount = balance * (config.riskPerTradePct / 100);
+        const quantity = riskAmount / slDistance;
+        if (quantity > 0 && balance >= quantity * candle.close) {
+          openPositions.push({
+            id: `pos-${openPositions.length}`,
+            direction: 'SHORT',
+            entryPrice: candle.close,
+            entryDate: date,
+            stopLoss: candle.close + slDistance,
+            takeProfit: candle.close - tpDistance,
+            quantity,
+            entryIndex: i,
+          });
+        }
+      }
+    }
+
+    // ── Strategy: Breakout ──
+    if (config.strategy === 'breakout') {
+      const lookback = 20;
+      const breakoutStart = startIdx + lookback;
+      if (i >= breakoutStart) {
+        const highestHigh = Math.max(...candles.slice(i - lookback, i).map(c => c.high));
+        const lowestLow = Math.min(...candles.slice(i - lookback, i).map(c => c.low));
+
+        // LONG breakout: price breaks above highest high of N periods
+        if (
+          candle.close > highestHigh
+          && candles[i - 1].close <= highestHigh
+          && rsiNotOverbought
+          && volumeOk
+          && canOpenLong
+        ) {
+          const riskAmount = balance * (config.riskPerTradePct / 100);
+          const quantity = riskAmount / slDistance;
+          if (quantity > 0 && balance >= quantity * candle.close) {
+            openPositions.push({
+              id: `pos-${openPositions.length}`,
+              direction: 'LONG',
+              entryPrice: candle.close,
+              entryDate: date,
+              stopLoss: candle.close - slDistance,
+              takeProfit: candle.close + tpDistance,
+              quantity,
+              entryIndex: i,
+            });
+          }
+        }
+
+        // SHORT breakout: price breaks below lowest low of N periods
+        if (
+          candle.close < lowestLow
+          && candles[i - 1].close >= lowestLow
+          && rsiNotOversold
+          && volumeOk
+          && canOpenShort
+        ) {
+          const riskAmount = balance * (config.riskPerTradePct / 100);
+          const quantity = riskAmount / slDistance;
+          if (quantity > 0 && balance >= quantity * candle.close) {
+            openPositions.push({
+              id: `pos-${openPositions.length}`,
+              direction: 'SHORT',
+              entryPrice: candle.close,
+              entryDate: date,
+              stopLoss: candle.close + slDistance,
+              takeProfit: candle.close - tpDistance,
+              quantity,
+              entryIndex: i,
+            });
+          }
+        }
+      }
+    }
+
+    // Push equity curve point
     equityCurve.push({
       step: i,
       equity: Math.round(equity * 100) / 100,
@@ -298,17 +629,30 @@ function runClientBacktest(
   const grossWins = trades.filter(t => t.pnl > 0).reduce((s, t) => s + t.pnl, 0);
   const grossLosses = Math.abs(trades.filter(t => t.pnl < 0).reduce((s, t) => s + t.pnl, 0));
 
+  const maxDDPercent = maxDrawdown;
+  const rawSummary = {
+    totalTrades: trades.length,
+    wins,
+    losses,
+    winRate: trades.length > 0 ? (wins / trades.length) * 100 : 0,
+    profitFactor: grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? 999 : 0,
+    maxDrawdownPercent: maxDDPercent,
+    totalPnl: Math.round((balance - config.initialBalance) * 100) / 100,
+  };
+
+  const viability = computeViability(rawSummary);
+
   return {
     summary: {
       totalTrades: trades.length,
       wins,
       losses,
-      winRate: trades.length > 0 ? (wins / trades.length) * 100 : 0,
-      profitFactor: grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? 999 : 0,
+      winRate: rawSummary.winRate,
+      profitFactor: rawSummary.profitFactor,
       sharpeRatio: 0,
       maxDrawdown: Math.round(maxDrawdown * 100) / 100,
-      maxDrawdownPercent: Math.round(maxDrawdown * 100) / 100,
-      totalPnl: Math.round((balance - config.initialBalance) * 100) / 100,
+      maxDrawdownPercent: Math.round(maxDDPercent * 100) / 100,
+      totalPnl: rawSummary.totalPnl,
       totalPnlPercent: Math.round(((balance / config.initialBalance) - 1) * 10000) / 100,
       avgWin: wins > 0
         ? Math.round((trades.filter(t => t.outcome === 'WIN').reduce((s, t) => s + t.pnl, 0) / wins) * 100) / 100
@@ -321,6 +665,7 @@ function runClientBacktest(
       avgHoldingBars: 0,
       startingBalance: config.initialBalance,
       finalBalance: Math.round(balance * 100) / 100,
+      viability,
     },
     equityCurve,
     trades,
@@ -330,6 +675,8 @@ function runClientBacktest(
       days: 0,
       startingBalance: config.initialBalance,
       leverage: config.leverage,
+      strategy: config.strategy,
+      rrRatio: config.rrRatio,
     },
   };
 }
@@ -342,6 +689,8 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
   const [days, setDays] = useState(14);
   const [balance, setBalance] = useState('1000');
   const [leverage, setLeverage] = useState(3);
+  const [strategy, setStrategy] = useState('ema-cross');
+  const [rrRatio, setRrRatio] = useState(2.0);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -461,8 +810,8 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
               leverage,
               riskPerTradePct: 2,
               maxPositions: 3,
-              stopLossPct: 2,
-              takeProfitPct: 4,
+              strategy,
+              rrRatio,
             }, (current, total) => {
               setProgressCurrent(current);
             });
@@ -491,7 +840,7 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
       }
       lockedRef.current = false;
     }
-  }, [coin, interval, days, balance, leverage, defaultCoin, running]);
+  }, [coin, interval, days, balance, leverage, strategy, rrRatio, defaultCoin, running]);
 
   // Auto-retry when countdown expires
   useEffect(() => {
@@ -513,6 +862,7 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
   };
 
   const s = result?.summary;
+  const strategyLabel = STRATEGY_OPTIONS.find(o => o.value === strategy)?.label || strategy;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -524,12 +874,12 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
           </DialogTitle>
           <DialogDescription>
             Тестирование торговой стратегии на исторических данных
-            <span className="block mt-1 text-[10px] text-muted-foreground/70">EMA кроссовер стратегия (9/21/50). Для быстрых результатов используйте 1Ч–4Ч интервалы и 7–14 дней</span>
+            <span className="block mt-1 text-[10px] text-muted-foreground/70">ATR-стопы, RSI фильтр, подтверждение объёмом. Для быстрых результатов используйте 1Ч–4Ч интервалы и 7–14 дней</span>
           </DialogDescription>
         </DialogHeader>
 
         {/* Parameters */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <div className="space-y-1">
             <label className="text-[10px] font-semibold text-muted-foreground">Монета</label>
             <Input
@@ -598,6 +948,41 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
               disabled={running}
             />
           </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-semibold text-muted-foreground">Стратегия</label>
+            <Select value={strategy} onValueChange={setStrategy} disabled={running}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {STRATEGY_OPTIONS.map(opt => (
+                  <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* R:R Ratio slider */}
+        <div className="space-y-1">
+          <label className="text-[10px] font-semibold text-muted-foreground">
+            R:R отношение: <span className="text-foreground font-bold">{rrRatio.toFixed(1)}</span>
+          </label>
+          <Slider
+            value={[rrRatio]}
+            onValueChange={v => setRrRatio(v[0])}
+            min={1.0}
+            max={4.0}
+            step={0.1}
+            className="mt-1"
+            disabled={running}
+          />
+          <div className="flex justify-between text-[9px] text-muted-foreground/60">
+            <span>1.0 (агрессивно)</span>
+            <span>4.0 (консервативно)</span>
+          </div>
         </div>
 
         <Button
@@ -651,7 +1036,7 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
                   Анализ {progressCurrent} / {progressTotal} свечей...{' '}
                   <span className="font-mono text-foreground">{elapsedSeconds}с</span>
                 </p>
-                <p className="text-xs text-muted-foreground/60">EMA кроссовер стратегия</p>
+                <p className="text-xs text-muted-foreground/60">{strategyLabel}</p>
                 {/* Progress bar */}
                 {progressTotal > 0 && (
                   <div className="w-full max-w-xs h-2 bg-muted rounded-full overflow-hidden">
@@ -680,6 +1065,51 @@ export function BacktestDialog({ open, onOpenChange, defaultCoin, coinSymbol }: 
         {/* Results */}
         {result && s && (
           <div className="space-y-4">
+            {/* Viability Badge + Score */}
+            <Card className={s.viability.isViable ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-red-500/40 bg-red-500/5'}>
+              <CardContent className="p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Badge className={s.viability.isViable
+                      ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 text-xs font-bold'
+                      : 'bg-red-500/20 text-red-600 dark:text-red-400 border-red-500/30 text-xs font-bold'
+                    }>
+                      {s.viability.isViable ? '✓ ЖИЗНЕСПОСОБНА' : '✗ НЕЖИЗНЕСПОСОБНА'}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">
+                      Оценка: <span className="font-bold text-foreground">{s.viability.score}/100</span>
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-muted-foreground">{strategyLabel} · R:R {result.parameters.rrRatio.toFixed(1)}</span>
+                </div>
+
+                {/* Viability bar */}
+                <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden mb-2">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${
+                      s.viability.score >= 50 ? 'bg-emerald-500' : 'bg-red-500'
+                    }`}
+                    style={{ width: `${Math.min(100, s.viability.score)}%` }}
+                  />
+                </div>
+
+                {/* Recommendation */}
+                <p className="text-xs text-muted-foreground">{s.viability.recommendation}</p>
+
+                {/* Warnings */}
+                {s.viability.warnings.length > 0 && (
+                  <ul className="mt-2 space-y-1">
+                    {s.viability.warnings.map((w, i) => (
+                      <li key={i} className="text-[11px] text-amber-600 dark:text-amber-400 flex items-start gap-1.5">
+                        <span className="mt-px">⚠</span>
+                        {w}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+
             {/* Key Metrics */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {[
